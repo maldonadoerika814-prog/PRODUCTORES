@@ -1,0 +1,1320 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>AgroDrone - Control de Fumigación y Secretaría</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              bg: '#050912',
+              card: '#0b1324',
+              border: '#1b2842',
+              accent: '#00ff88',
+              accentDark: '#10b981',
+              blue: '#00d4ff',
+              blueDark: '#3b82f6',
+              warning: '#f59e0b',
+              danger: '#ef4444'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Google Font Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <!-- Estilos personalizados (fondo.jpg, vidrio, móvil y PDF blanco) -->
+  <link rel="stylesheet" href="styles.css">
+
+  <!-- Lucide Icons, Chart.js & SheetJS (xlsx) -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="app.js" defer></script>
+</head>
+<body class="min-h-screen antialiased selection:bg-brand-accent selection:text-black">
+
+  <!-- Fondo fijo (fondo.jpg) y capa oscura semitransparente -->
+  <div id="appBackgroundLayer" aria-hidden="true"></div>
+  <div id="appBackgroundOverlay" aria-hidden="true"></div>
+
+  <!-- Contenedor de notificaciones Toast -->
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-[100] space-y-2 max-w-sm w-[calc(100%-2rem)] pointer-events-none"></div>
+
+  <!-- Contenedor principal de la aplicación (se oculta limpiamente al imprimir PDF) -->
+  <div id="appShell" class="min-h-screen flex flex-col md:flex-row w-full max-w-full overflow-x-hidden">
+
+    <!-- Barra superior móvil -->
+    <div class="md:hidden flex items-center justify-between px-4 py-3 glass-sidebar border-b border-white/10 sticky top-0 z-40 w-full">
+      <div class="flex items-center space-x-2.5 min-w-0">
+        <div class="p-2 bg-gradient-to-tr from-brand-accent to-brand-blue rounded-xl text-black shadow-lg shadow-brand-accent/25 shrink-0">
+          <i data-lucide="plane" class="w-5 h-5 stroke-[2.5]"></i>
+        </div>
+        <div class="min-w-0">
+          <div class="flex items-center space-x-1.5">
+            <span class="font-extrabold text-base tracking-tight text-white">Agro<span class="text-brand-accent">Drone</span></span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-brand-accent/15 text-brand-accent font-bold">V4.1</span>
+          </div>
+          <p id="mobileCurrentTabLabel" class="text-[11px] text-slate-300 truncate">Panel Principal</p>
+        </div>
+      </div>
+      <div class="flex items-center space-x-2 shrink-0">
+        <button type="button" onclick="exportSystemJSON()" class="p-2.5 text-brand-accent hover:bg-brand-accent/15 rounded-xl border border-brand-accent/30 bg-slate-900/60" title="Descargar respaldo JSON">
+          <i data-lucide="download" class="w-5 h-5"></i>
+        </button>
+        <button type="button" id="mobileMenuBtn" aria-label="Abrir menú" class="p-2.5 text-slate-200 hover:text-brand-accent rounded-xl border border-brand-border bg-slate-900/60">
+          <i data-lucide="menu" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Barra lateral de navegación -->
+    <aside id="sidebar" class="fixed md:sticky md:top-0 inset-y-0 left-0 z-50 w-72 md:w-64 md:h-screen glass-sidebar border-r border-white/10 transform -translate-x-full md:translate-x-0 transition-transform duration-300 flex flex-col justify-between shrink-0 overflow-y-auto">
+      <div>
+        <!-- Encabezado de marca -->
+        <div class="flex items-center justify-between p-5 border-b border-white/10">
+          <div class="flex items-center space-x-3">
+            <div class="p-2.5 bg-gradient-to-br from-brand-accent to-brand-blue rounded-xl text-black shadow-lg shadow-brand-accent/30">
+              <i data-lucide="plane" class="w-6 h-6 stroke-[2.5]"></i>
+            </div>
+            <div>
+              <div class="flex items-center space-x-1.5">
+                <h1 class="font-extrabold text-xl tracking-tight text-white">Agro<span class="text-brand-accent">Drone</span></h1>
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-brand-accent/15 text-brand-accent border border-brand-accent/30">V4.1</span>
+              </div>
+              <p class="text-[11px] text-slate-300 font-medium">Secretaría y Piloto</p>
+            </div>
+          </div>
+          <button type="button" id="mobileCloseSidebarBtn" aria-label="Cerrar menú" class="md:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <!-- Enlaces de navegación -->
+        <nav class="p-4 space-y-1.5" aria-label="Menú principal">
+          <button type="button" onclick="switchTab('dashboard')" id="nav-dashboard" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium text-left transition-all nav-active">
+            <i data-lucide="layout-dashboard" class="w-5 h-5 shrink-0"></i>
+            <span>Panel Principal</span>
+          </button>
+          <button type="button" onclick="switchTab('daily')" id="nav-daily" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium text-left transition-all text-slate-300 hover:text-white hover:bg-slate-800/60">
+            <i data-lucide="clipboard-check" class="w-5 h-5 shrink-0"></i>
+            <span>Fumigados del Día</span>
+          </button>
+          <button type="button" onclick="switchTab('dji')" id="nav-dji" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium text-left transition-all text-slate-300 hover:text-white hover:bg-slate-800/60">
+            <i data-lucide="file-spreadsheet" class="w-5 h-5 shrink-0"></i>
+            <span>Importar vuelos DJI</span>
+          </button>
+          <button type="button" onclick="switchTab('producers')" id="nav-producers" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium text-left transition-all text-slate-300 hover:text-white hover:bg-slate-800/60">
+            <i data-lucide="users" class="w-5 h-5 shrink-0"></i>
+            <span>Productores y Fincas</span>
+          </button>
+          <button type="button" onclick="switchTab('sprays')" id="nav-sprays" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium text-left transition-all text-slate-300 hover:text-white hover:bg-slate-800/60">
+            <i data-lucide="droplets" class="w-5 h-5 shrink-0"></i>
+            <span>Fumigaciones</span>
+          </button>
+          <button type="button" onclick="switchTab('calendar')" id="nav-calendar" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium text-left transition-all text-slate-300 hover:text-white hover:bg-slate-800/60">
+            <i data-lucide="calendar-days" class="w-5 h-5 shrink-0"></i>
+            <span>Calendario</span>
+          </button>
+          <button type="button" onclick="switchTab('billing')" id="nav-billing" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium text-left transition-all text-slate-300 hover:text-white hover:bg-slate-800/60">
+            <i data-lucide="wallet" class="w-5 h-5 shrink-0"></i>
+            <span>Cobros y Cartera</span>
+          </button>
+          <button type="button" onclick="switchTab('settings')" id="nav-settings" class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium text-left transition-all text-slate-300 hover:text-white hover:bg-slate-800/60">
+            <i data-lucide="sliders-horizontal" class="w-5 h-5 shrink-0"></i>
+            <span>Configuración</span>
+          </button>
+        </nav>
+      </div>
+
+      <!-- Pie de barra lateral: Temporada activa y estado de respaldo -->
+      <div class="p-4 border-t border-white/10 bg-black/30 space-y-2.5">
+        <div class="flex items-center justify-between text-xs text-slate-300">
+          <span class="flex items-center"><i data-lucide="map-pin" class="w-3.5 h-3.5 mr-1.5 text-brand-blue"></i> El Oro, Ecuador</span>
+          <span class="text-[10px] bg-slate-900/80 px-2 py-0.5 rounded text-brand-blue font-semibold">GMT-5</span>
+        </div>
+        <div id="sidebarSeasonBadge" class="text-xs px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center space-x-2">
+          <span class="w-2 h-2 rounded-full bg-brand-accent shrink-0"></span>
+          <span id="sidebarSeasonText" class="truncate">Temporada configurada</span>
+        </div>
+        <div class="pt-1 space-y-1.5">
+          <div id="sidebarBackupStatus" class="text-[11px] text-slate-300 flex items-center justify-between">
+            <span>Respaldo JSON:</span>
+            <span id="sidebarBackupDateText" class="font-semibold text-amber-300">Pendiente</span>
+          </div>
+          <button type="button" onclick="exportSystemJSON()" class="w-full px-3 py-2 rounded-xl bg-slate-900/85 hover:bg-slate-800 text-brand-accent border border-brand-accent/35 text-xs font-bold flex items-center justify-center space-x-1.5 transition-colors">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+            <span>Respaldar JSON</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Fondo oscuro del menú móvil -->
+    <div id="sidebarOverlay" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 hidden md:hidden"></div>
+
+    <!-- Área de contenido principal -->
+    <main class="flex-1 min-w-0 p-4 md:p-8 overflow-y-auto max-w-7xl mx-auto w-full space-y-5">
+
+      <!-- Aviso de respaldo pendiente (si hace días que no se respalda) -->
+      <div id="backupReminderBanner" class="hidden glass-card neon-glow-amber px-4 py-3.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex items-start sm:items-center space-x-3">
+          <div class="p-2 rounded-xl bg-amber-500/20 text-amber-300 shrink-0">
+            <i data-lucide="shield-alert" class="w-5 h-5"></i>
+          </div>
+          <div class="text-xs">
+            <div class="font-bold text-amber-300">Recordatorio de respaldo de datos</div>
+            <p id="backupReminderText" class="text-slate-200 mt-0.5">Hace varios días que no descargas un respaldo JSON.</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-2 shrink-0">
+          <button type="button" onclick="exportSystemJSON()" class="px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-bold text-xs flex items-center space-x-1.5">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+            <span>Respaldar ahora</span>
+          </button>
+          <button type="button" onclick="dismissBackupBannerForSession()" class="px-2.5 py-2 rounded-xl bg-slate-900/80 text-slate-300 hover:text-white text-xs border border-white/10">
+            Luego
+          </button>
+        </div>
+      </div>
+
+      <!-- Barra superior de página -->
+      <header class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-white/15">
+        <div>
+          <h2 id="pageTitle" class="text-2xl font-extrabold text-white tracking-tight">Panel Principal</h2>
+          <p id="pageSubtitle" class="text-sm text-slate-300">Control de fumigaciones, frecuencias por temporada, cobros y avisos por WhatsApp</p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          <div id="topSeasonBadge" class="flex-1 sm:flex-initial px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center space-x-2 bg-slate-950/65 border border-brand-blue/35 text-brand-blue backdrop-blur-md">
+            <i data-lucide="calendar-clock" class="w-4 h-4 shrink-0"></i>
+            <span id="topSeasonText">Regla activa: 15d lluviosa / 21d seca</span>
+          </div>
+          <button type="button" onclick="switchTab('daily')" class="neon-btn px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 shrink-0">
+            <i data-lucide="clipboard-check" class="w-4 h-4"></i>
+            <span>Fumigados del Día</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- ===================================================== -->
+      <!-- TAB 1: PANEL PRINCIPAL                                -->
+      <!-- ===================================================== -->
+      <section id="tab-dashboard" class="space-y-6 tab-animate">
+
+        <!-- Aviso mientras existan datos de ejemplo -->
+        <div id="sampleDataNoticeBanner" class="hidden glass-card neon-glow-blue px-4 py-3.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex items-start sm:items-center space-x-3">
+            <div class="p-2 rounded-xl bg-brand-blue/20 text-brand-blue shrink-0">
+              <i data-lucide="info" class="w-5 h-5"></i>
+            </div>
+            <div class="text-xs">
+              <div class="font-bold text-brand-blue">Datos de ejemplo activos</div>
+              <p class="text-slate-200 mt-0.5">Actualmente hay productores y fumigaciones de demostración cargados. Cuando quieras empezar con datos reales, puedes vaciarlos sin perder tu Configuración.</p>
+            </div>
+          </div>
+          <div class="flex items-center space-x-2 shrink-0">
+            <button type="button" onclick="requestStartWithEmptyData()" class="px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-bold text-xs flex items-center space-x-1.5">
+              <i data-lucide="eraser" class="w-3.5 h-3.5"></i>
+              <span>Empezar con datos vacíos</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 5 KPIs principales -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div class="glass-card glass-card-hover neon-glow-blue p-5 rounded-2xl">
+            <div class="flex items-center justify-between text-slate-300 mb-2">
+              <span class="text-[11px] font-bold uppercase tracking-wider">Productores</span>
+              <div class="p-1.5 rounded-lg bg-brand-blue/15 text-brand-blue">
+                <i data-lucide="users" class="w-4 h-4"></i>
+              </div>
+            </div>
+            <div id="kpiProducersCount" class="text-3xl font-black text-white">0</div>
+            <span id="kpiFarmsCount" class="text-xs text-brand-blue font-medium">0 fincas registradas</span>
+          </div>
+
+          <div class="glass-card glass-card-hover neon-glow-green p-5 rounded-2xl">
+            <div class="flex items-center justify-between text-slate-300 mb-2">
+              <span class="text-[11px] font-bold uppercase tracking-wider">Hectáreas</span>
+              <div class="p-1.5 rounded-lg bg-brand-accent/15 text-brand-accent">
+                <i data-lucide="layers" class="w-4 h-4"></i>
+              </div>
+            </div>
+            <div id="kpiTotalHectares" class="text-3xl font-black text-brand-accent">0.00 ha</div>
+            <span class="text-xs text-slate-300">Fumigaciones realizadas</span>
+          </div>
+
+          <div class="glass-card glass-card-hover p-5 rounded-2xl">
+            <div class="flex items-center justify-between text-slate-300 mb-2">
+              <span class="text-[11px] font-bold uppercase tracking-wider">Fumig. Mes</span>
+              <div class="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-400">
+                <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+              </div>
+            </div>
+            <div id="kpiMonthSprays" class="text-3xl font-black text-white">0</div>
+            <span id="kpiMonthLabel" class="text-xs text-slate-300">En mes actual</span>
+          </div>
+
+          <div class="glass-card glass-card-hover neon-glow-amber p-5 rounded-2xl">
+            <div class="flex items-center justify-between text-slate-300 mb-2">
+              <span class="text-[11px] font-bold uppercase tracking-wider">Por Cobrar</span>
+              <div class="p-1.5 rounded-lg bg-amber-500/15 text-amber-400">
+                <i data-lucide="dollar-sign" class="w-4 h-4"></i>
+              </div>
+            </div>
+            <div id="kpiPendingAmount" class="text-3xl font-black text-amber-400">$0.00</div>
+            <span id="kpiPendingCount" class="text-xs text-slate-300">0 cuentas con saldo</span>
+          </div>
+
+          <div class="glass-card glass-card-hover neon-glow-red p-5 rounded-2xl">
+            <div class="flex items-center justify-between text-slate-300 mb-2">
+              <span class="text-[11px] font-bold uppercase tracking-wider">Vencidas</span>
+              <div class="p-1.5 rounded-lg bg-rose-500/15 text-rose-400">
+                <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+              </div>
+            </div>
+            <div id="kpiExpiredCount" class="text-3xl font-black text-rose-400">0</div>
+            <span class="text-xs text-rose-300/90 font-medium">Atrasadas al día de hoy</span>
+          </div>
+        </div>
+
+        <!-- Pendientes de hoy y de la semana -->
+        <div class="glass-card neon-glow-amber p-5 sm:p-6 rounded-2xl space-y-4">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div class="flex items-center space-x-3">
+              <div class="p-2.5 rounded-xl bg-amber-500/20 text-amber-300 shrink-0">
+                <i data-lucide="clipboard-list" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <h3 class="text-lg font-extrabold text-white">Pendientes de Hoy y de la Semana</h3>
+                <p class="text-xs text-slate-300">A quién toca fumigar según fecha base o reprogramada, atrasados, cobros pendientes y depósito al piloto</p>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+              <div class="px-3.5 py-2 rounded-xl bg-slate-950/70 border border-amber-500/35">
+                <span class="block text-[10px] uppercase font-bold text-slate-400">Por Cobrar (Productores)</span>
+                <span id="pendientesPorCobrar" class="text-base font-black text-amber-400">$0.00</span>
+              </div>
+              <div class="px-3.5 py-2 rounded-xl bg-slate-950/70 border border-brand-blue/35">
+                <span class="block text-[10px] uppercase font-bold text-slate-400">Por Depositar al Piloto</span>
+                <span id="pendientesDepositoPiloto" class="text-base font-black text-brand-blue">$0.00</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="pendientesListContainer" class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto pr-1"></div>
+        </div>
+
+        <!-- Gráficos -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div class="glass-card p-5 rounded-2xl">
+            <h4 class="text-sm font-bold text-white mb-4 flex items-center">
+              <i data-lucide="bar-chart-3" class="w-4 h-4 mr-2 text-brand-accent"></i> Hectáreas Fumigadas por Mes
+            </h4>
+            <div class="h-64">
+              <canvas id="chartHectaresMonth"></canvas>
+            </div>
+          </div>
+
+          <div class="glass-card p-5 rounded-2xl">
+            <h4 class="text-sm font-bold text-white mb-4 flex items-center">
+              <i data-lucide="pie-chart" class="w-4 h-4 mr-2 text-brand-blue"></i> Monto Cobrado por Método de Pago
+            </h4>
+            <div class="h-64">
+              <canvas id="chartPaymentMethods"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabla de próximas fumigaciones -->
+        <div class="glass-card p-5 sm:p-6 rounded-2xl space-y-4">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h3 class="text-lg font-bold text-white">Próximas Fumigaciones Programadas</h3>
+              <p class="text-xs text-slate-300">Ordenadas por urgencia según regla de temporada (lluviosa/seca) o fecha reprogramada</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 text-[11px]">
+              <span class="px-2 py-1 rounded-lg bg-rose-500/15 text-rose-300 border border-rose-500/30">Vencida</span>
+              <span class="px-2 py-1 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30">Hoy / Esta semana</span>
+              <span class="px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">Al día</span>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs md:text-sm min-w-[740px]">
+              <thead>
+                <tr class="border-b border-brand-border text-slate-300 font-semibold uppercase text-[11px] tracking-wider">
+                  <th class="py-3 px-3">Productor / Finca</th>
+                  <th class="py-3 px-3">Sector</th>
+                  <th class="py-3 px-3">Última Fumig.</th>
+                  <th class="py-3 px-3">Próxima Fecha</th>
+                  <th class="py-3 px-3">Estado Fecha</th>
+                  <th class="py-3 px-3">Detalle / Reprogramación</th>
+                  <th class="py-3 px-3 text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="upcomingSpraysTableBody" class="divide-y divide-brand-border/50 text-slate-200"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================== -->
+      <!-- TAB 2: REGISTRAR FUMIGADOS DEL DÍA                    -->
+      <!-- ===================================================== -->
+      <section id="tab-daily" class="hidden space-y-6 tab-animate">
+        <div class="glass-card neon-glow-green p-5 sm:p-6 rounded-2xl space-y-5">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-white/10 pb-4">
+            <div class="flex items-center space-x-3">
+              <div class="p-2.5 rounded-xl bg-brand-accent/20 text-brand-accent shrink-0">
+                <i data-lucide="clipboard-check" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <h3 class="text-lg font-extrabold text-white">Registrar Fumigados del Día</h3>
+                <p class="text-xs text-slate-300">Elige la fecha, marca con casillas las fincas fumigadas ese día y completa sus datos para registrarlas todas juntas.</p>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full lg:w-auto">
+              <div>
+                <label for="dailySprayDate" class="block text-[10px] uppercase font-bold text-slate-300 mb-1">Fecha de Fumigación</label>
+                <input type="date" id="dailySprayDate" onchange="onDailyDateChanged()" class="w-full px-3.5 py-2 rounded-xl bg-slate-900/90 border border-brand-accent/40 text-white text-sm font-semibold">
+              </div>
+              <div>
+                <label for="dailySearchInput" class="block text-[10px] uppercase font-bold text-slate-300 mb-1">Buscar Productor / Finca</label>
+                <input type="text" id="dailySearchInput" oninput="filterDailyCards()" placeholder="Filtrar lista..." class="w-full px-3.5 py-2 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm">
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-950/65 border border-brand-border">
+            <div class="text-xs text-slate-200 flex flex-wrap items-center gap-2.5">
+              <span id="dailySelectedCounter" class="px-2.5 py-1 rounded-lg bg-brand-accent/20 text-brand-accent font-extrabold">0 fincas marcadas</span>
+              <span class="text-slate-300">Al guardar se crea una fumigación realizada por cada finca marcada y se recalcula su próxima fecha.</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 shrink-0">
+              <button type="button" onclick="switchTab('dji')" class="px-4 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-brand-blue border border-brand-blue/35 font-bold text-xs flex items-center justify-center space-x-1.5">
+                <i data-lucide="file-up" class="w-4 h-4"></i>
+                <span>Importar vuelos DJI</span>
+              </button>
+              <button type="button" onclick="saveDailyBatchSprays()" class="neon-btn px-5 py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center space-x-2">
+                <i data-lucide="save" class="w-4 h-4"></i>
+                <span>Guardar Fumigados del Día</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="dailyFarmsChecklist" class="space-y-3"></div>
+        </div>
+      </section>
+
+      <!-- ===================================================== -->
+      <!-- TAB 2B: IMPORTAR VUELOS DJI (SMARTFARM TASK HISTORY)  -->
+      <!-- ===================================================== -->
+      <section id="tab-dji" class="hidden space-y-6 tab-animate">
+        <div class="glass-card neon-glow-blue p-5 sm:p-6 rounded-2xl space-y-5">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-white/10 pb-4">
+            <div class="flex items-center space-x-3">
+              <div class="p-2.5 rounded-xl bg-brand-blue/20 text-brand-blue shrink-0">
+                <i data-lucide="file-spreadsheet" class="w-6 h-6"></i>
+              </div>
+              <div>
+                <h3 class="text-lg font-extrabold text-white">Importar vuelos DJI (SmartFarm)</h3>
+                <p class="text-xs text-slate-300">
+                  Carga el Excel de <strong>DJI SmartFarm (Task History)</strong>, hoja <code class="text-brand-blue">flight record</code>. Agrupa por fecha + <code>Location</code>, convierte <code>mu</code> a hectáreas (<code>mu / 15</code>), lee piloto/dron/volumen y recuerda tus ubicaciones y <code>Plot ID</code>.
+                </p>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2.5 shrink-0">
+              <label class="neon-btn px-4 py-2.5 rounded-xl font-extrabold text-xs cursor-pointer flex items-center space-x-2">
+                <i data-lucide="upload" class="w-4 h-4"></i>
+                <span>Cargar Excel de vuelos</span>
+                <input type="file" id="djiExcelFileInput" accept=".xlsx,.xls,.csv" onchange="handleDjiExcelUpload(event)" class="hidden">
+              </label>
+            </div>
+          </div>
+
+          <!-- Reglas y columnas esperadas -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <div class="p-3 rounded-xl bg-slate-950/60 border border-brand-border">
+              <div class="text-[10px] font-bold uppercase text-brand-blue mb-1">Hoja y Columnas</div>
+              <p class="text-slate-300">Hoja <strong>flight record</strong>: <span class="text-slate-100">Flight time</span>, <span class="text-slate-100">Location</span>, <span class="text-slate-100">Serial Number</span>, <span class="text-slate-100">Plot ID</span>, <span class="text-slate-100">Field Name</span>, <span class="text-slate-100">Sprayed area</span>. Opcionales: <span class="text-slate-100">Pliot Name</span>, <span class="text-slate-100">Aircraft name</span>, <span class="text-slate-100">Total Amount(L/Kg)</span>.</p>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-950/60 border border-brand-border">
+              <div class="text-[10px] font-bold uppercase text-brand-accent mb-1">Agrupación y Duplicados</div>
+              <p class="text-slate-300">Agrupa por <strong>Fecha + Location</strong> (o por Plot ID si falta Location). Hectáreas = <strong>mu ÷ 15</strong> (2 decimales). Clave única por vuelo: <strong>Flight time + Serial Number</strong>.</p>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-950/60 border border-brand-border">
+              <div class="text-[10px] font-bold uppercase text-amber-300 mb-1">Valores al Registrar</div>
+              <p id="djiDefaultsInfo" class="text-slate-300">Estado: Realizada • Pago: Pendiente • Piloto y dron tomados del Excel (respaldo: Configuración).</p>
+            </div>
+          </div>
+
+          <!-- Caja de errores de formato / columnas faltantes -->
+          <div id="djiErrorBox" class="hidden p-4 rounded-xl bg-rose-950/50 border border-rose-500/50 text-xs text-rose-200 space-y-1"></div>
+
+          <!-- Caja de advertencias (ej. falta columna Location) -->
+          <div id="djiWarningBox" class="hidden p-3.5 rounded-xl bg-amber-950/50 border border-amber-500/50 text-xs text-amber-200 space-y-1"></div>
+
+          <!-- Resumen de lectura / registro -->
+          <div id="djiSummaryBox" class="hidden grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div class="p-3.5 rounded-xl bg-slate-950/75 border border-brand-border">
+              <div class="text-[10px] font-bold uppercase text-slate-400">Vuelos leídos</div>
+              <div id="djiSumFlightsRead" class="text-2xl font-black text-white mt-0.5">0</div>
+            </div>
+            <div class="p-3.5 rounded-xl bg-slate-950/75 border border-slate-600/60">
+              <div class="text-[10px] font-bold uppercase text-slate-400">Duplicados omitidos</div>
+              <div id="djiSumDuplicates" class="text-2xl font-black text-slate-300 mt-0.5">0</div>
+            </div>
+            <div class="p-3.5 rounded-xl bg-slate-950/75 border border-brand-accent/40">
+              <div class="text-[10px] font-bold uppercase text-brand-accent">Filas registradas</div>
+              <div id="djiSumRegistered" class="text-2xl font-black text-brand-accent mt-0.5">0</div>
+            </div>
+            <div class="p-3.5 rounded-xl bg-slate-950/75 border border-brand-blue/40">
+              <div class="text-[10px] font-bold uppercase text-brand-blue">Hectáreas totales</div>
+              <div id="djiSumHectares" class="text-2xl font-black text-brand-blue mt-0.5">0.00 ha</div>
+            </div>
+            <div class="col-span-2 sm:col-span-1 p-3.5 rounded-xl bg-slate-950/75 border border-amber-500/40">
+              <div class="text-[10px] font-bold uppercase text-amber-300">Sin asignar</div>
+              <div id="djiSumUnassigned" class="text-2xl font-black text-amber-300 mt-0.5">0</div>
+            </div>
+          </div>
+
+          <!-- Tabla de revisión (agrupada por fecha y Location) -->
+          <div id="djiReviewWrapper" class="hidden space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-950/70 border border-brand-border">
+              <div class="text-xs text-slate-200">
+                <strong id="djiLoadedFileName" class="text-brand-blue">Archivo cargado</strong>
+                <span id="djiReviewHint" class="block text-slate-400 mt-0.5">Revisa las filas agrupadas por fecha y ubicación, separa por lote si necesitas, asigna productor/finca y presiona Registrar.</span>
+              </div>
+              <div class="flex items-center space-x-2 shrink-0">
+                <button type="button" onclick="clearDjiPreview()" class="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold">
+                  Limpiar vista
+                </button>
+                <button type="button" id="djiRegisterBtn" onclick="registerDjiImportedRows()" class="neon-btn px-5 py-2.5 rounded-xl font-extrabold text-xs flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                  <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+                  <span>Registrar</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Campos opcionales de producto y dosis para todas las filas -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 rounded-xl bg-slate-950/60 border border-brand-accent/25">
+              <div>
+                <label for="djiProductNameInput" class="block text-[10px] font-bold uppercase text-brand-accent mb-1">Producto aplicado (opcional)</label>
+                <input type="text" id="djiProductNameInput" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-xs" placeholder="Ej. Mancozeb Plus 80 (vacío = Aplicación DJI SmartFarm)">
+              </div>
+              <div>
+                <label for="djiProductDoseInput" class="block text-[10px] font-bold uppercase text-brand-accent mb-1">Dosis/ha (opcional, para PDF)</label>
+                <input type="text" id="djiProductDoseInput" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-xs" placeholder="Ej. 1.5 L/ha o 1.2 kg/ha">
+              </div>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse text-xs md:text-sm min-w-[820px]">
+                <thead>
+                  <tr class="border-b border-brand-border text-slate-300 font-semibold uppercase text-[11px] tracking-wider">
+                    <th class="py-3 px-3 w-10 text-center">Inc.</th>
+                    <th class="py-3 px-3">Fecha / Horario</th>
+                    <th class="py-3 px-3">Ubicación (Location) / Plot IDs</th>
+                    <th class="py-3 px-3">Vuelos</th>
+                    <th class="py-3 px-3">Hectáreas / Monto</th>
+                    <th class="py-3 px-3">Productor / Finca</th>
+                  </tr>
+                </thead>
+                <tbody id="djiReviewTableBody" class="divide-y divide-brand-border/50 text-slate-200"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Memorias guardadas (Location y Plot ID) -->
+          <div class="pt-4 border-t border-white/10 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h4 class="text-xs font-bold uppercase tracking-wider text-slate-300">Memorias guardadas (Ubicaciones y Plot IDs)</h4>
+                <p class="text-[11px] text-slate-400">Las filas agrupadas usan la memoria de Ubicación (Location); las separadas por lote usan la memoria de Plot ID.</p>
+              </div>
+              <span id="djiImportedKeysCounter" class="text-[11px] px-2.5 py-1 rounded-lg bg-slate-900/90 border border-brand-border text-slate-300 font-mono">0 vuelos en historial</span>
+            </div>
+
+            <div class="space-y-2">
+              <div class="text-[11px] font-bold uppercase tracking-wider text-brand-accent">Memoria de Ubicaciones (Location → Finca)</div>
+              <div id="djiLocationMemoryList" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5"></div>
+            </div>
+
+            <div class="space-y-2 pt-2 border-t border-white/5">
+              <div class="text-[11px] font-bold uppercase tracking-wider text-brand-blue">Memoria de Plot IDs (Plot ID → Finca)</div>
+              <div id="djiPlotMemoryList" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================== -->
+      <!-- TAB 3: PRODUCTORES Y FINCAS                           -->
+      <!-- ===================================================== -->
+      <section id="tab-producers" class="hidden space-y-6 tab-animate">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
+            <div class="relative flex-1 max-w-md">
+              <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5"></i>
+              <input type="text" id="searchProducerInput" oninput="renderProducersList()" placeholder="Buscar por nombre, cédula, finca o sector..." class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/80 border border-brand-border text-white text-sm focus:outline-none focus:border-brand-accent">
+            </div>
+            <select id="filterCropSelect" onchange="renderProducersList()" class="px-3.5 py-2.5 rounded-xl bg-slate-950/80 border border-brand-border text-white text-sm focus:outline-none focus:border-brand-accent">
+              <option value="ALL">Todos los cultivos</option>
+              <option value="Banano">Banano</option>
+              <option value="Cacao">Cacao</option>
+              <option value="Arroz">Arroz</option>
+              <option value="Plátano">Plátano</option>
+              <option value="Maíz">Maíz</option>
+            </select>
+            <select id="filterSectorSelect" onchange="renderProducersList()" class="px-3.5 py-2.5 rounded-xl bg-slate-950/80 border border-brand-border text-white text-sm focus:outline-none focus:border-brand-accent">
+              <option value="ALL">Todos los sectores</option>
+            </select>
+          </div>
+          <button type="button" onclick="openProducerModal()" class="neon-btn px-4 py-2.5 font-bold rounded-xl flex items-center justify-center space-x-2 text-sm shrink-0">
+            <i data-lucide="user-plus" class="w-4 h-4"></i>
+            <span>Nuevo Productor</span>
+          </button>
+        </div>
+
+        <div id="producersCardsGrid" class="grid grid-cols-1 lg:grid-cols-2 gap-5"></div>
+      </section>
+
+      <!-- ===================================================== -->
+      <!-- TAB 4: FUMIGACIONES                                   -->
+      <!-- ===================================================== -->
+      <section id="tab-sprays" class="hidden space-y-6 tab-animate">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <h3 class="text-lg font-bold text-white">Historial y Registro de Fumigaciones</h3>
+            <p class="text-xs text-slate-300">Control de aplicaciones (Realizada, Pendiente o Reprogramada), productos con dosis, pagos y PDF</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <select id="filterSprayStatusSelect" onchange="renderSpraysTable()" class="px-3 py-2.5 rounded-xl bg-slate-950/80 border border-brand-border text-white text-xs font-semibold">
+              <option value="ALL">Todos los estados</option>
+              <option value="Realizada">Solo Realizadas</option>
+              <option value="Pendiente">Solo Pendientes</option>
+              <option value="Reprogramada">Solo Reprogramadas</option>
+            </select>
+            <button type="button" onclick="switchTab('daily')" class="px-4 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-brand-blue border border-brand-blue/35 font-bold text-xs flex items-center space-x-2">
+              <i data-lucide="clipboard-check" class="w-4 h-4"></i>
+              <span>Fumigados del Día</span>
+            </button>
+            <button type="button" onclick="openSprayModal()" class="neon-btn px-4 py-2.5 font-bold rounded-xl flex items-center justify-center space-x-2 text-xs">
+              <i data-lucide="plus" class="w-4 h-4"></i>
+              <span>Nueva Individual</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="glass-card p-4 sm:p-6 rounded-2xl">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs md:text-sm min-w-[820px]">
+              <thead>
+                <tr class="border-b border-brand-border text-slate-300 font-semibold uppercase text-[11px] tracking-wider">
+                  <th class="py-3 px-3">Fecha / Orden</th>
+                  <th class="py-3 px-3">Productor / Finca</th>
+                  <th class="py-3 px-3">Hectáreas</th>
+                  <th class="py-3 px-3">Producto / Dron</th>
+                  <th class="py-3 px-3">Piloto</th>
+                  <th class="py-3 px-3">Monto / Pago</th>
+                  <th class="py-3 px-3">Estado / Motivo</th>
+                  <th class="py-3 px-3 text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="spraysTableBody" class="divide-y divide-brand-border/50 text-slate-200"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================== -->
+      <!-- TAB 5: CALENDARIO                                     -->
+      <!-- ===================================================== -->
+      <section id="tab-calendar" class="hidden space-y-6 tab-animate">
+        <div class="glass-card p-5 sm:p-6 rounded-2xl space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 id="calendarMonthTitle" class="text-xl font-extrabold text-white">Noviembre 2026</h3>
+              <div class="flex flex-wrap items-center gap-3 text-[11px] text-slate-300 mt-1">
+                <span class="flex items-center"><span class="w-2.5 h-2.5 rounded bg-emerald-500/35 border border-brand-accent mr-1.5"></span> Fecha Base (Temporada)</span>
+                <span class="flex items-center"><span class="w-2.5 h-2.5 rounded bg-amber-500/35 border border-amber-400 mr-1.5"></span> Fecha Reprogramada</span>
+              </div>
+            </div>
+            <div class="flex items-center space-x-2">
+              <button type="button" onclick="changeCalendarMonth(-1)" aria-label="Mes anterior" class="p-2.5 rounded-xl bg-slate-800 text-slate-200 hover:text-white border border-brand-border"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
+              <button type="button" onclick="resetCalendarToToday()" class="px-3.5 py-2.5 rounded-xl bg-slate-800 text-xs font-semibold text-brand-accent hover:bg-slate-700 border border-brand-border">Hoy</button>
+              <button type="button" onclick="changeCalendarMonth(1)" aria-label="Mes siguiente" class="p-2.5 rounded-xl bg-slate-800 text-slate-200 hover:text-white border border-brand-border"><i data-lucide="chevron-right" class="w-5 h-5"></i></button>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto pb-1">
+            <div class="min-w-[620px] space-y-2">
+              <div class="grid grid-cols-7 gap-1.5 text-center font-semibold text-xs text-slate-300 border-b border-brand-border pb-2">
+                <div>Dom</div><div>Lun</div><div>Mar</div><div>Mié</div><div>Jue</div><div>Vie</div><div>Sáb</div>
+              </div>
+              <div id="calendarGrid" class="grid grid-cols-7 gap-1.5 sm:gap-2 min-h-[420px]"></div>
+            </div>
+          </div>
+
+          <!-- Lista compacta del mes (muy práctica en celular) -->
+          <div class="pt-4 border-t border-white/10 space-y-2.5">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-300">Resumen de fincas programadas en este mes</h4>
+            <div id="calendarMonthSummaryList" class="grid grid-cols-1 md:grid-cols-2 gap-2.5"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================== -->
+      <!-- TAB 6: COBROS Y CARTERA                               -->
+      <!-- ===================================================== -->
+      <section id="tab-billing" class="hidden space-y-6 tab-animate">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h3 class="text-lg font-bold text-white">Gestión de Cobros y Cuentas por Cobrar</h3>
+            <p class="text-xs text-slate-300">Resumen real cobrado por método de pago, abonos parciales, exportación CSV y recordatorios WhatsApp</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <select id="filterBillingStatusSelect" onchange="renderBillingTable()" class="px-3 py-2.5 rounded-xl bg-slate-950/80 border border-brand-border text-white text-xs font-semibold">
+              <option value="ALL">Todos los cobros</option>
+              <option value="OPEN">Con saldo pendiente</option>
+              <option value="PAID">Solo Pagados</option>
+            </select>
+            <button type="button" onclick="exportBillingCSV()" class="px-4 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-brand-accent border border-brand-accent/30 text-xs font-bold flex items-center justify-center space-x-2">
+              <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+              <span>Exportar CSV</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="billingSummaryCards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"></div>
+
+        <div class="glass-card p-4 sm:p-6 rounded-2xl">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs md:text-sm min-w-[760px]">
+              <thead>
+                <tr class="border-b border-brand-border text-slate-300 font-semibold uppercase text-[11px] tracking-wider">
+                  <th class="py-3 px-3">Fecha / Orden</th>
+                  <th class="py-3 px-3">Productor</th>
+                  <th class="py-3 px-3">Finca</th>
+                  <th class="py-3 px-3">Monto / Saldo</th>
+                  <th class="py-3 px-3">Método / Comprobante</th>
+                  <th class="py-3 px-3">Estado</th>
+                  <th class="py-3 px-3 text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="billingTableBody" class="divide-y divide-brand-border/50 text-slate-200"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================== -->
+      <!-- TAB 7: CONFIGURACIÓN Y RESPALDO                       -->
+      <!-- ===================================================== -->
+      <section id="tab-settings" class="hidden space-y-6 tab-animate">
+        <div class="glass-card p-5 sm:p-6 rounded-2xl space-y-6">
+          <div>
+            <h3 class="text-lg font-bold text-white mb-1">Configuración de Secretaría, Temporadas, WhatsApp y Respaldo</h3>
+            <p class="text-xs text-slate-300">Al modificar los meses de temporada lluviosa o los días de frecuencia, todas las fechas base se recalculan automáticamente.</p>
+          </div>
+
+          <form id="settingsForm" onsubmit="saveSettings(event)" class="space-y-6" novalidate>
+            <!-- Datos de la asociación -->
+            <div class="p-4 rounded-2xl bg-slate-950/55 border border-brand-blue/30 space-y-4">
+              <h4 class="text-sm font-bold text-brand-blue flex items-center">
+                <i data-lucide="building-2" class="w-4 h-4 mr-2"></i> Datos de la Asociación (Encabezado de PDFs)
+              </h4>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label for="settingAssocName" class="block text-xs font-semibold text-slate-300 mb-1">Nombre de la Asociación *</label>
+                  <input type="text" id="settingAssocName" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" placeholder="AgroDrone">
+                </div>
+                <div>
+                  <label for="settingAssocPhone" class="block text-xs font-semibold text-slate-300 mb-1">Teléfono / WhatsApp Oficina</label>
+                  <input type="text" id="settingAssocPhone" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" placeholder="099-123-4567">
+                </div>
+                <div>
+                  <label for="settingAssocRuc" class="block text-xs font-semibold text-slate-300 mb-1">RUC / Identificación</label>
+                  <input type="text" id="settingAssocRuc" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" placeholder="0791234567001">
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+                <div>
+                  <label class="block text-xs font-semibold text-slate-300 mb-1">Logo Opcional para PDF (PNG/JPG)</label>
+                  <div class="flex flex-wrap items-center gap-2.5">
+                    <label class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-brand-accent border border-brand-accent/30 text-xs font-semibold cursor-pointer flex items-center space-x-2">
+                      <i data-lucide="image-plus" class="w-4 h-4"></i>
+                      <span>Subir Logo</span>
+                      <input type="file" accept="image/*" onchange="handleAssocLogoUpload(event)" class="hidden">
+                    </label>
+                    <button type="button" onclick="clearAssocLogo()" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs">Quitar</button>
+                    <img id="settingLogoPreview" src="" alt="Logo de la asociación" class="hidden h-10 w-auto rounded-lg border border-white/15 bg-white p-1">
+                  </div>
+                </div>
+                <div>
+                  <label for="settingClientRatePerHa" class="block text-xs font-semibold text-slate-300 mb-1">Tarifa Sugerida Cliente ($/ha)</label>
+                  <input type="number" step="0.01" min="0" id="settingClientRatePerHa" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" value="15.00">
+                </div>
+                <div>
+                  <label for="settingPilotRatePerHa" class="block text-xs font-semibold text-slate-300 mb-1">Pago por Hectárea al Piloto ($/ha)</label>
+                  <input type="number" step="0.01" min="0" id="settingPilotRatePerHa" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" value="4.50">
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                <div>
+                  <label for="settingPilotsList" class="block text-xs font-semibold text-slate-300 mb-1">Pilotos Registrados (separados por coma) *</label>
+                  <input type="text" id="settingPilotsList" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" placeholder="Juan Diego Cobos Anguisaca">
+                </div>
+                <div>
+                  <label for="settingDronesList" class="block text-xs font-semibold text-slate-300 mb-1">Drones Registrados (separados por coma) *</label>
+                  <input type="text" id="settingDronesList" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" placeholder="Alfa_3">
+                </div>
+              </div>
+            </div>
+
+            <!-- Plantillas WhatsApp -->
+            <div class="p-4 rounded-2xl bg-slate-950/55 border border-brand-accent/30 space-y-4">
+              <div>
+                <h4 class="text-sm font-bold text-brand-accent flex items-center">
+                  <i data-lucide="message-circle" class="w-4 h-4 mr-2"></i> Plantillas de WhatsApp Editables (Ecuador +593)
+                </h4>
+                <p class="text-[11px] text-slate-300 mt-1">
+                  Abre WhatsApp (<code class="text-brand-blue">wa.me</code>) con el texto listo para revisar y enviar.
+                  Variables: <code class="text-brand-blue">{nombre}</code>, <code class="text-brand-blue">{finca}</code>, <code class="text-brand-blue">{fecha}</code>, <code class="text-brand-blue">{motivo}</code>, <code class="text-brand-blue">{saldo}</code>, <code class="text-brand-blue">{monto}</code>, <code class="text-brand-blue">{asociacion}</code>.
+                </p>
+              </div>
+              <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div>
+                  <label for="settingWaTemplateReminder" class="block text-xs font-semibold text-slate-300 mb-1">Recordatorio Próxima Fumigación</label>
+                  <textarea id="settingWaTemplateReminder" rows="3" class="w-full px-3 py-2 rounded-xl bg-slate-900/90 border border-brand-border text-white text-xs"></textarea>
+                </div>
+                <div>
+                  <label for="settingWaTemplateReschedule" class="block text-xs font-semibold text-slate-300 mb-1">Aviso de Reprogramación</label>
+                  <textarea id="settingWaTemplateReschedule" rows="3" class="w-full px-3 py-2 rounded-xl bg-slate-900/90 border border-brand-border text-white text-xs"></textarea>
+                </div>
+                <div>
+                  <label for="settingWaTemplatePayment" class="block text-xs font-semibold text-slate-300 mb-1">Recordatorio de Cobro / Saldo</label>
+                  <textarea id="settingWaTemplatePayment" rows="3" class="w-full px-3 py-2 rounded-xl bg-slate-900/90 border border-brand-border text-white text-xs"></textarea>
+                </div>
+              </div>
+            </div>
+
+            <!-- Fondo fijo fondo.jpg y oscurecimiento -->
+            <div class="p-4 rounded-2xl bg-slate-950/55 border border-white/15 space-y-3">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 class="text-sm font-bold text-white flex items-center">
+                    <i data-lucide="wallpaper" class="w-4 h-4 mr-2 text-brand-blue"></i> Fondo Fijo (<code class="text-brand-accent ml-1">fondo.jpg</code>) y Capa Oscura
+                  </h4>
+                  <p class="text-[11px] text-slate-300 mt-0.5">La app usa el archivo local optimizado <code>fondo.jpg</code> sin imágenes pesadas en base64.</p>
+                </div>
+                <div class="flex items-center space-x-3 text-xs text-slate-200">
+                  <label for="settingOverlayOpacity">Oscurecimiento:</label>
+                  <input type="range" id="settingOverlayOpacity" min="45" max="80" value="62" oninput="previewOverlayOpacity(this.value)" class="accent-emerald-400 w-28">
+                  <span id="settingOverlayOpacityVal" class="font-mono text-brand-accent font-bold w-10 text-right">62%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Regla de frecuencias por temporada -->
+            <div class="space-y-4">
+              <div class="space-y-2.5">
+                <label class="text-sm font-semibold text-slate-200">Meses de Temporada Lluviosa (Regla de Frecuencia)</label>
+                <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                  <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/90 border border-brand-border hover:border-brand-accent/40 cursor-pointer text-xs"><input type="checkbox" name="rainyMonths" value="1" class="accent-emerald-400"> <span>Enero</span></label>
+                  <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/90 border border-brand-border hover:border-brand-accent/40 cursor-pointer text-xs"><input type="checkbox" name="rainyMonths" value="2" class="accent-emerald-400"> <span>Febrero</span></label>
+                  <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/90 border border-brand-border hover:border-brand-accent/40 cursor-pointer text-xs"><input type="checkbox" name="rainyMonths" value="3" class="accent-emerald-400"> <span>Marzo</span></label>
+                  <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/90 border border-brand-border hover:border-brand-accent/40 cursor-pointer text-xs"><input type="checkbox" name="rainyMonths" value="4" class="accent-emerald-400"> <span>Abril</span></label>
+                  <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/90 border border-brand-border hover:border-brand-accent/40 cursor-pointer text-xs"><input type="checkbox" name="rainyMonths" value="5" class="accent-emerald-400"> <span>Mayo</span></label>
+                  <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/90 border border-brand-border hover:border-brand-accent/40 cursor-pointer text-xs"><input type="checkbox" name="rainyMonths" value="6" class="accent-emerald-400"> <span>Junio</span></label>
+                  <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/90 border border-brand-border hover:border-brand-accent/40 cursor-pointer text-xs"><input type="checkbox" name="rainyMonths" value="7" class="accent-emerald-400"> <span>Julio</span></label>
+                  <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/90 border border-brand-border hover:border-brand-accent/40 cursor-pointer text-xs"><input type="checkbox" name="rainyMonths" value="8" class="accent-emerald-400"> <span>Agosto</span></label>
+                  <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/90 border border-brand-border hover:border-brand-accent/40 cursor-pointer text-xs"><input type="checkbox" name="rainyMonths" value="9" class="accent-emerald-400"> <span>Septiembre</span></label>
+                  <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/90 border border-brand-border hover:border-brand-accent/40 cursor-pointer text-xs"><input type="checkbox" name="rainyMonths" value="10" class="accent-emerald-400"> <span>Octubre</span></label>
+                  <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/90 border border-brand-border hover:border-brand-accent/40 cursor-pointer text-xs"><input type="checkbox" name="rainyMonths" value="11" class="accent-emerald-400"> <span>Noviembre</span></label>
+                  <label class="flex items-center space-x-2 p-2.5 rounded-xl bg-slate-900/90 border border-brand-border hover:border-brand-accent/40 cursor-pointer text-xs"><input type="checkbox" name="rainyMonths" value="12" class="accent-emerald-400"> <span>Diciembre</span></label>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label for="settingDaysRainy" class="block text-xs font-semibold text-slate-300 mb-1">Días en Temporada Lluviosa *</label>
+                  <input type="number" id="settingDaysRainy" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" value="15" min="1" max="90" required>
+                </div>
+                <div>
+                  <label for="settingDaysDry" class="block text-xs font-semibold text-slate-300 mb-1">Días en Temporada Seca *</label>
+                  <input type="number" id="settingDaysDry" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" value="21" min="1" max="90" required>
+                </div>
+                <div>
+                  <label for="settingBackupReminderDays" class="block text-xs font-semibold text-slate-300 mb-1">Avisar si pasan N días sin respaldar *</label>
+                  <input type="number" id="settingBackupReminderDays" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" value="3" min="1" max="60" required>
+                </div>
+              </div>
+
+              <label class="flex items-center space-x-2.5 p-3 rounded-xl bg-slate-950/60 border border-brand-border cursor-pointer text-xs text-slate-200">
+                <input type="checkbox" id="settingAutoBackupOnClose" class="w-4 h-4 accent-emerald-400" checked>
+                <span><strong>Respaldo automático al cerrar:</strong> guarda copia de seguridad automática en el navegador al cerrar/salir y avisa si hay cambios sin exportar a JSON.</span>
+              </label>
+            </div>
+
+            <div class="flex items-center justify-end space-x-3 pt-4 border-t border-brand-border">
+              <button type="submit" class="neon-btn px-6 py-2.5 font-bold rounded-xl text-sm">
+                Guardar Configuración y Recalcular
+              </button>
+            </div>
+          </form>
+
+          <!-- Respaldo y restauración -->
+          <div class="pt-6 border-t border-brand-border space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h4 class="text-sm font-bold text-white">Respaldo y Restauración (JSON)</h4>
+                <p id="settingsBackupMetaInfo" class="text-xs text-slate-300 mt-0.5">Último respaldo JSON: aún no realizado.</p>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-3">
+              <button type="button" onclick="exportSystemJSON()" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-brand-accent/40 text-xs font-semibold flex items-center space-x-2">
+                <i data-lucide="download" class="w-4 h-4 text-brand-accent"></i>
+                <span>Exportar Respaldo JSON</span>
+              </button>
+              <label class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-brand-blue/40 text-xs font-semibold flex items-center space-x-2 cursor-pointer">
+                <i data-lucide="upload" class="w-4 h-4 text-brand-blue"></i>
+                <span>Restaurar desde JSON</span>
+                <input type="file" accept=".json,application/json" onchange="importSystemJSON(event)" class="hidden">
+              </label>
+              <button type="button" onclick="requestRestoreAutoBackup()" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/35 text-xs font-semibold flex items-center space-x-2">
+                <i data-lucide="history" class="w-4 h-4"></i>
+                <span>Restaurar Último Auto-Respaldo</span>
+              </button>
+              <button type="button" id="linkAutoBackupFileBtn" onclick="linkAutoBackupFile()" class="hidden px-4 py-2.5 rounded-xl bg-emerald-950/70 hover:bg-emerald-900/70 text-brand-accent border border-brand-accent/35 text-xs font-semibold flex items-center space-x-2">
+                <i data-lucide="hard-drive" class="w-4 h-4"></i>
+                <span id="linkAutoBackupFileLabel">Vincular Archivo Auto-Respaldo PC</span>
+              </button>
+              <button type="button" onclick="requestStartWithEmptyData()" class="px-4 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center space-x-2">
+                <i data-lucide="eraser" class="w-4 h-4"></i>
+                <span>Empezar con datos vacíos</span>
+              </button>
+              <button type="button" onclick="requestResetSampleData()" class="px-4 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center space-x-2">
+                <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                <span>Restablecer Datos de Ejemplo</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ===================================================== -->
+  <!-- MODAL: PRODUCTOR Y FINCA CRUD                         -->
+  <!-- ===================================================== -->
+  <div id="producerModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-4">
+    <div class="glass-card neon-glow-green w-full max-w-2xl max-h-[92dvh] overflow-y-auto rounded-2xl p-5 sm:p-6 space-y-4 relative">
+      <button type="button" onclick="closeModal('producerModal')" aria-label="Cerrar" class="absolute top-4 right-4 text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+
+      <h3 id="producerModalTitle" class="text-lg font-bold text-white pr-8">Registrar Nuevo Productor</h3>
+
+      <form id="producerForm" onsubmit="saveProducerForm(event)" class="space-y-4" novalidate>
+        <input type="hidden" id="producerFormId">
+        <input type="hidden" id="editingFarmId">
+
+        <div id="producerFieldsGroup" class="space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label for="producerName" class="block text-xs font-semibold text-slate-300 mb-1">Nombre Completo del Productor *</label>
+              <input type="text" id="producerName" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="Ej. Carlos Mendoza">
+            </div>
+            <div>
+              <label for="producerDoc" class="block text-xs font-semibold text-slate-300 mb-1">Cédula (10 dígitos) o RUC (13 dígitos) *</label>
+              <input type="text" id="producerDoc" required oninput="updateDocValidationPreview()" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="Ej. 0704123456">
+              <p id="producerDocPreview" class="text-[11px] text-slate-400 mt-1">Se verifica que no exista otro productor con la misma cédula/RUC.</p>
+            </div>
+          </div>
+
+          <div>
+            <label for="producerPhone" class="block text-xs font-semibold text-slate-300 mb-1">Teléfono WhatsApp (Ecuador: 09XXXXXXXX o +5939XXXXXXXX)</label>
+            <input type="tel" id="producerPhone" oninput="updatePhoneFormatPreview()" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="0991234567 (o dejar vacío si no tiene)">
+            <p id="producerPhonePreview" class="text-[11px] text-slate-400 mt-1">Si empieza con 09 se convertirá automáticamente a 5939...</p>
+          </div>
+        </div>
+
+        <div id="farmFieldsGroup" class="pt-4 border-t border-brand-border space-y-4">
+          <h4 id="farmSectionTitle" class="text-sm font-bold text-brand-accent">Datos de la Finca</h4>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label for="farmName" class="block text-xs font-semibold text-slate-300 mb-1">Nombre Finca *</label>
+              <input type="text" id="farmName" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="Ej. Hacienda Oro Verde">
+            </div>
+            <div>
+              <label for="farmCrop" class="block text-xs font-semibold text-slate-300 mb-1">Cultivo *</label>
+              <select id="farmCrop" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm">
+                <option value="Banano">Banano</option>
+                <option value="Cacao">Cacao</option>
+                <option value="Arroz">Arroz</option>
+                <option value="Plátano">Plátano</option>
+                <option value="Maíz">Maíz</option>
+              </select>
+            </div>
+            <div>
+              <label for="farmHectares" class="block text-xs font-semibold text-slate-300 mb-1">Hectáreas (ha) *</label>
+              <input type="number" step="0.01" min="0.01" id="farmHectares" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="18.50">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label for="farmSector" class="block text-xs font-semibold text-slate-300 mb-1">Sector / Ubicación *</label>
+              <input type="text" id="farmSector" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="Ej. Barbones, El Guabo, El Oro">
+            </div>
+            <div>
+              <label for="farmLastSprayDate" class="block text-xs font-semibold text-slate-300 mb-1">Fecha Última Fumigación (opcional si es nueva)</label>
+              <input type="date" id="farmLastSprayDate" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm">
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end space-x-3 pt-4 border-t border-brand-border">
+          <button type="button" onclick="closeModal('producerModal')" class="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold">Cancelar</button>
+          <button type="submit" class="neon-btn px-5 py-2.5 font-bold rounded-xl text-xs">Guardar Cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================================================== -->
+  <!-- MODAL: FUMIGACIÓN INDIVIDUAL CRUD                     -->
+  <!-- ===================================================== -->
+  <div id="sprayModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-4">
+    <div class="glass-card neon-glow-green w-full max-w-2xl max-h-[92dvh] overflow-y-auto rounded-2xl p-5 sm:p-6 space-y-4 relative">
+      <button type="button" onclick="closeModal('sprayModal')" aria-label="Cerrar" class="absolute top-4 right-4 text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+
+      <h3 id="sprayModalTitle" class="text-lg font-bold text-white pr-8">Registrar Nueva Fumigación</h3>
+
+      <form id="sprayForm" onsubmit="saveSprayForm(event)" class="space-y-4" novalidate>
+        <input type="hidden" id="sprayEditId">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div class="sm:col-span-2">
+            <label for="sprayFarmSelect" class="block text-xs font-semibold text-slate-300 mb-1">Seleccionar Finca *</label>
+            <select id="sprayFarmSelect" onchange="onSprayFarmSelected()" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm"></select>
+          </div>
+          <div>
+            <label for="sprayDate" class="block text-xs font-semibold text-slate-300 mb-1">Fecha de Fumigación *</label>
+            <input type="date" id="sprayDate" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div>
+            <label for="sprayOrderNumber" class="block text-xs font-semibold text-slate-300 mb-1">N.º Orden</label>
+            <input type="text" id="sprayOrderNumber" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-brand-blue font-mono text-xs" placeholder="ORD-2026-009">
+          </div>
+          <div>
+            <label for="sprayStatus" class="block text-xs font-semibold text-slate-300 mb-1">Estado *</label>
+            <select id="sprayStatus" class="w-full px-2.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-xs font-semibold">
+              <option value="Realizada">Realizada</option>
+              <option value="Pendiente">Pendiente</option>
+              <option value="Reprogramada">Reprogramada</option>
+            </select>
+          </div>
+          <div>
+            <label for="sprayHectares" class="block text-xs font-semibold text-slate-300 mb-1">Hectáreas *</label>
+            <input type="number" step="0.01" min="0.01" id="sprayHectares" oninput="onSprayHectaresChanged()" required class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm">
+          </div>
+          <div>
+            <label for="sprayDrone" class="block text-xs font-semibold text-slate-300 mb-1">Dron *</label>
+            <select id="sprayDrone" class="w-full px-2.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-xs"></select>
+          </div>
+          <div class="col-span-2 sm:col-span-1">
+            <label for="sprayPilot" class="block text-xs font-semibold text-slate-300 mb-1">Piloto *</label>
+            <select id="sprayPilot" required class="w-full px-2.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-xs"></select>
+          </div>
+        </div>
+
+        <!-- Productos múltiples con dosis -->
+        <div class="p-3.5 rounded-xl bg-slate-950/65 border border-brand-accent/30 space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <h4 class="text-xs font-bold text-brand-accent uppercase tracking-wider">Productos Aplicados y Dosis (para PDF)</h4>
+            <button type="button" onclick="addProductRowToSprayForm()" class="px-2.5 py-1 rounded-lg bg-brand-accent/20 text-brand-accent hover:bg-brand-accent/30 text-[11px] font-bold flex items-center space-x-1 shrink-0">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Agregar Producto</span>
+            </button>
+          </div>
+          <div id="sprayProductsContainer" class="space-y-2"></div>
+        </div>
+
+        <div>
+          <label for="sprayNotes" class="block text-xs font-semibold text-slate-300 mb-1">Observaciones (aparece en el PDF)</label>
+          <textarea id="sprayNotes" rows="2" class="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-xs" placeholder="Ej. Aplicación completa en lote norte, sin novedades..."></textarea>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label for="sprayAmount" class="block text-xs font-semibold text-slate-300 mb-1">Monto Total Cliente ($ USD) *</label>
+            <input type="number" step="0.01" min="0" id="sprayAmount" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="250.00">
+          </div>
+          <div>
+            <label for="sprayPilotPay" class="block text-xs font-semibold text-slate-300 mb-1">Depósito al Piloto ($ USD)</label>
+            <input type="number" step="0.01" min="0" id="sprayPilotPay" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-brand-blue text-sm" placeholder="0.00">
+          </div>
+          <div>
+            <label for="sprayPilotPaid" class="block text-xs font-semibold text-slate-300 mb-1">Estado Pago al Piloto</label>
+            <select id="sprayPilotPaid" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm">
+              <option value="false">Pendiente de depositar</option>
+              <option value="true">Ya depositado</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="p-3.5 rounded-xl bg-slate-900/80 border border-brand-border space-y-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label for="sprayPayMethod" class="block text-xs font-semibold text-slate-300 mb-1">Método de Pago *</label>
+              <select id="sprayPayMethod" onchange="togglePaymentRefFields()" required class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-brand-border text-white text-sm">
+                <option value="Transferencia">Transferencia Bancaria</option>
+                <option value="Cheque">Cheque</option>
+                <option value="Efectivo">Efectivo</option>
+              </select>
+            </div>
+            <div>
+              <label for="sprayPayStatus" class="block text-xs font-semibold text-slate-300 mb-1">Estado del Pago *</label>
+              <select id="sprayPayStatus" onchange="togglePartialPaidField()" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-brand-border text-white text-sm">
+                <option value="Pagado">Pagado Completo</option>
+                <option value="Parcial">Abono Parcial</option>
+                <option value="Pendiente">Pendiente de Pago</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="partialPaidGroup" class="hidden">
+            <label for="sprayAmountPaid" class="block text-xs font-semibold text-amber-300 mb-1">Monto Abonado ($ USD) — debe ser mayor a $0 y menor al total</label>
+            <input type="number" step="0.01" min="0" id="sprayAmountPaid" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-amber-500/40 text-white text-sm" placeholder="0.00">
+          </div>
+
+          <div id="paymentRefContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label id="payRefLabel" for="sprayPayRef" class="block text-xs font-semibold text-slate-300 mb-1">N.º Comprobante / Referencia</label>
+              <input type="text" id="sprayPayRef" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-brand-border text-white text-sm" placeholder="Ej. TR-994821">
+            </div>
+            <div id="payBankGroup">
+              <label for="sprayPayBank" class="block text-xs font-semibold text-slate-300 mb-1">Banco Emisor</label>
+              <input type="text" id="sprayPayBank" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-brand-border text-white text-sm" placeholder="Ej. Banco Machala / Pichincha">
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end space-x-3 pt-4 border-t border-brand-border">
+          <button type="button" onclick="closeModal('sprayModal')" class="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold">Cancelar</button>
+          <button type="submit" class="neon-btn px-5 py-2.5 font-bold rounded-xl text-xs">Guardar Fumigación</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================================================== -->
+  <!-- MODAL: REGISTRAR ABONO / COBRO RÁPIDO                 -->
+  <!-- ===================================================== -->
+  <div id="paymentModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-4">
+    <div class="glass-card neon-glow-blue w-full max-w-md rounded-2xl p-5 sm:p-6 space-y-4 relative">
+      <button type="button" onclick="closeModal('paymentModal')" aria-label="Cerrar" class="absolute top-4 right-4 text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+
+      <div>
+        <h3 class="text-lg font-bold text-white flex items-center pr-8">
+          <i data-lucide="wallet" class="w-5 h-5 mr-2 text-brand-blue"></i> Registrar Abono / Pago
+        </h3>
+        <p id="paymentModalSubtitle" class="text-xs text-slate-300 mt-0.5"></p>
+      </div>
+
+      <form id="paymentForm" onsubmit="saveQuickPaymentForm(event)" class="space-y-3.5" novalidate>
+        <input type="hidden" id="paymentSprayId">
+
+        <div class="grid grid-cols-3 gap-2 text-center p-3 rounded-xl bg-slate-950/75 border border-brand-border text-xs">
+          <div>
+            <div class="text-[10px] uppercase text-slate-400">Total</div>
+            <div id="paymentInfoTotal" class="font-bold text-white">$0.00</div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase text-slate-400">Abonado</div>
+            <div id="paymentInfoPaid" class="font-bold text-brand-accent">$0.00</div>
+          </div>
+          <div>
+            <div class="text-[10px] uppercase text-slate-400">Saldo</div>
+            <div id="paymentInfoBalance" class="font-bold text-amber-400">$0.00</div>
+          </div>
+        </div>
+
+        <div>
+          <label for="paymentAddAmount" class="block text-xs font-semibold text-slate-300 mb-1">Monto que ingresa hoy ($ USD) *</label>
+          <input type="number" step="0.01" min="0.01" id="paymentAddAmount" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-accent/45 text-white text-sm font-bold">
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label for="paymentMethod" class="block text-xs font-semibold text-slate-300 mb-1">Método de Pago</label>
+            <select id="paymentMethod" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm">
+              <option value="Transferencia">Transferencia</option>
+              <option value="Cheque">Cheque</option>
+              <option value="Efectivo">Efectivo</option>
+            </select>
+          </div>
+          <div>
+            <label for="paymentRef" class="block text-xs font-semibold text-slate-300 mb-1">Comprobante / Ref</label>
+            <input type="text" id="paymentRef" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="Opcional">
+          </div>
+        </div>
+
+        <div>
+          <label for="paymentBank" class="block text-xs font-semibold text-slate-300 mb-1">Banco (si aplica)</label>
+          <input type="text" id="paymentBank" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="Ej. Banco Pichincha / Machala">
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-3 border-t border-brand-border">
+          <button type="button" onclick="closeModal('paymentModal')" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold">Cancelar</button>
+          <button type="submit" class="neon-btn px-5 py-2 rounded-xl font-bold text-xs">Registrar Abono</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================================================== -->
+  <!-- MODAL: REPROGRAMAR FUMIGACIÓN                         -->
+  <!-- ===================================================== -->
+  <div id="rescheduleModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-4">
+    <div class="glass-card neon-glow-amber w-full max-w-lg max-h-[92dvh] overflow-y-auto rounded-2xl p-5 sm:p-6 space-y-4 relative">
+      <button type="button" onclick="closeModal('rescheduleModal')" aria-label="Cerrar" class="absolute top-4 right-4 text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+
+      <div>
+        <h3 class="text-lg font-bold text-white flex items-center pr-8">
+          <i data-lucide="calendar-clock" class="w-5 h-5 mr-2 text-amber-400"></i> Reprogramar Fumigación
+        </h3>
+        <p id="rescheduleFarmSubtitle" class="text-xs text-slate-300 mt-0.5"></p>
+      </div>
+
+      <form id="rescheduleForm" onsubmit="saveRescheduleForm(event)" class="space-y-4" novalidate>
+        <input type="hidden" id="rescheduleFarmId">
+        <input type="hidden" id="rescheduleSprayId">
+        <input type="hidden" id="rescheduleOldDate">
+
+        <div>
+          <label for="rescheduleNewDate" class="block text-xs font-semibold text-slate-300 mb-1">Nueva Fecha Programada *</label>
+          <input type="date" id="rescheduleNewDate" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm">
+        </div>
+
+        <div>
+          <label for="rescheduleDescription" class="block text-xs font-semibold text-slate-300 mb-1">Descripción / Motivo de la Reprogramación *</label>
+          <textarea id="rescheduleDescription" required rows="3" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="Ej. Llovió fuerte en el sector, se pasa para el día siguiente..."></textarea>
+        </div>
+
+        <div id="rescheduleHistoryBox" class="p-3 rounded-xl bg-slate-950/70 border border-brand-border space-y-1.5 max-h-36 overflow-y-auto hidden">
+          <div class="text-[10px] font-bold uppercase text-slate-400">Historial de Reprogramaciones</div>
+          <div id="rescheduleHistoryList" class="space-y-1 text-[11px] text-slate-300"></div>
+        </div>
+
+        <div id="rescheduleWaReadyBox" class="hidden p-3.5 rounded-xl bg-emerald-950/50 border border-brand-accent/40 space-y-2">
+          <div class="text-xs font-bold text-brand-accent">Reprogramación guardada. Revisa y envía el aviso por WhatsApp:</div>
+          <div id="rescheduleWaBtnContainer"></div>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-brand-border">
+          <button type="button" id="clearRescheduleBtn" onclick="requestClearReschedule()" class="hidden px-3 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/35 text-xs font-semibold">
+            Volver a fecha base
+          </button>
+          <div class="flex items-center space-x-2 ml-auto">
+            <button type="button" onclick="closeModal('rescheduleModal')" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold">Cerrar</button>
+            <button type="submit" class="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs">Guardar Reprogramación</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================================================== -->
+  <!-- MODAL: PDF ORDEN / CERTIFICADO DE FUMIGACIÓN (BLANCO) -->
+  <!-- ===================================================== -->
+  <div id="printableSprayPdfModal" class="printable-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-3 sm:p-4">
+    <div class="printable-sheet glass-card w-full max-w-4xl max-h-[92dvh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
+      <div class="no-print flex flex-wrap justify-between items-center gap-3 pb-3 border-b border-white/15">
+        <h3 class="font-bold text-base sm:text-lg text-white">Vista Previa PDF — Orden de Fumigación</h3>
+        <div class="flex space-x-2">
+          <button type="button" onclick="printCurrentPdf()" class="neon-btn px-4 py-2 rounded-xl font-bold text-xs flex items-center space-x-2">
+            <i data-lucide="printer" class="w-4 h-4"></i>
+            <span>Imprimir / Guardar PDF</span>
+          </button>
+          <button type="button" onclick="closeModal('printableSprayPdfModal')" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 hover:text-white text-xs font-semibold">Cerrar</button>
+        </div>
+      </div>
+
+      <div id="sprayPdfModalContent" class="pdf-paper space-y-4"></div>
+    </div>
+  </div>
+
+  <!-- ===================================================== -->
+  <!-- MODAL: PDF ESTADO DE CUENTA DEL PRODUCTOR (BLANCO)    -->
+  <!-- ===================================================== -->
+  <div id="printableStatementModal" class="printable-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-3 sm:p-4">
+    <div class="printable-sheet glass-card w-full max-w-4xl max-h-[92dvh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
+      <div class="no-print flex flex-wrap justify-between items-center gap-3 pb-3 border-b border-white/15">
+        <h3 class="font-bold text-base sm:text-lg text-white">Vista Previa PDF — Historial y Estado de Cuenta</h3>
+        <div class="flex space-x-2">
+          <button type="button" onclick="printCurrentPdf()" class="neon-btn px-4 py-2 rounded-xl font-bold text-xs flex items-center space-x-2">
+            <i data-lucide="printer" class="w-4 h-4"></i>
+            <span>Imprimir / Guardar PDF</span>
+          </button>
+          <button type="button" onclick="closeModal('printableStatementModal')" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 hover:text-white text-xs font-semibold">Cerrar</button>
+        </div>
+      </div>
+
+      <div id="statementModalContent" class="pdf-paper space-y-4"></div>
+    </div>
+  </div>
+
+  <!-- ===================================================== -->
+  <!-- MODAL: CONFIRMACIÓN PERSONALIZADA                     -->
+  <!-- ===================================================== -->
+  <div id="confirmModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[90] hidden flex items-center justify-center p-4">
+    <div class="glass-card neon-glow-amber w-full max-w-md rounded-2xl p-6 space-y-4">
+      <div class="flex items-center space-x-3 text-amber-400">
+        <i data-lucide="alert-triangle" class="w-6 h-6 shrink-0"></i>
+        <h3 id="confirmModalTitle" class="text-base font-bold text-white">Confirmar acción</h3>
+      </div>
+      <p id="confirmModalMessage" class="text-sm text-slate-200 leading-relaxed"></p>
+      <div class="flex justify-end space-x-3 pt-2">
+        <button type="button" onclick="closeConfirmModal()" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold">Cancelar</button>
+        <button type="button" id="confirmModalActionBtn" class="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-black font-bold text-xs">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

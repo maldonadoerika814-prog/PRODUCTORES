@@ -1,6 +1,6 @@
 /* ==========================================================================
-   AgroDrone - Hoja de Estilos Principal (styles.css)
-   Fondo fijo con fondo.jpg, capa oscura semitransparente, efecto vidrio
+   AgroDrone - Hoja de Estilos Principal (css/styles.css)
+   Fondo fijo con ../fondo.jpg, capa oscura semitransparente, efecto vidrio
    y estilos de impresión limpia en blanco para PDFs.
    ========================================================================== */
 
@@ -30,7 +30,7 @@ body {
   inset: 0;
   z-index: -2;
   background-color: #050912;
-  background-image: url("fondo.jpg");
+  background-image: url("../fondo.jpg");
   background-position: center center;
   background-size: cover;
   background-repeat: no-repeat;
@@ -120,6 +120,12 @@ body {
   box-shadow: 0 0 16px rgba(0, 255, 136, 0.12);
 }
 
+/* Contenedor responsivo para gráficos Chart.js */
+.chart-box {
+  height: 16rem;
+  position: relative;
+}
+
 /* Errores visuales de validación en campos */
 .input-error {
   border-color: #ef4444 !important;
@@ -140,6 +146,12 @@ body {
 
 .tab-animate {
   animation: fadeSlideIn 0.22s ease-out;
+}
+
+/* Notificaciones Toast animadas sin estilos inline */
+.toast-fade-out {
+  opacity: 0 !important;
+  transform: translateY(6px) !important;
 }
 
 /* Barras de desplazamiento personalizadas */
@@ -164,7 +176,6 @@ body {
 /* Ajustes para celular */
 @media (max-width: 767px) {
   #appBackgroundLayer {
-    /* En móviles, background-attachment: fixed puede causar saltos; el div ya es position: fixed */
     background-attachment: scroll;
   }
 

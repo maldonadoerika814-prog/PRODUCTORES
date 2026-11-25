@@ -1,0 +1,14 @@
+# Archivos de prueba o exportaciones con datos reales (no publicar en GitHub)
+*.xlsx
+*.xls
+*.csv
+*Backup*.json
+*AutoBackup*.json
+
+# Archivos temporales del sistema operativo / editores
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*
+.vscode/
+.idea/

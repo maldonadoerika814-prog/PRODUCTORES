@@ -20,10 +20,10 @@ function switchTab(tabId) {
 
     if (t === tabId) {
       section.classList.remove("hidden");
-      nav.className = "w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium text-left transition-all nav-active";
+      nav.className = "w-full flex items-center space-x-2.5 lg:space-x-3 px-3 lg:px-4 py-2.5 lg:py-3 text-xs lg:text-sm rounded-xl font-medium text-left transition-all nav-active";
     } else {
       section.classList.add("hidden");
-      nav.className = "w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium text-left transition-all text-slate-300 hover:text-white hover:bg-slate-800/60";
+      nav.className = "w-full flex items-center space-x-2.5 lg:space-x-3 px-3 lg:px-4 py-2.5 lg:py-3 text-xs lg:text-sm rounded-xl font-medium text-left transition-all text-slate-300 hover:text-white hover:bg-slate-800/60";
     }
   });
 
@@ -54,7 +54,7 @@ function switchTab(tabId) {
 function syncSidebarInertState() {
   const sidebar = document.getElementById("sidebar");
   if (!sidebar) return;
-  const isHiddenOffCanvas = window.innerWidth < 1024 && sidebar.classList.contains("-translate-x-full");
+  const isHiddenOffCanvas = window.innerWidth < 768 && sidebar.classList.contains("-translate-x-full");
   sidebar.inert = isHiddenOffCanvas;
   if (isHiddenOffCanvas) {
     sidebar.setAttribute("inert", "");
@@ -69,8 +69,8 @@ function closeMobileSidebar(restoreFocus = false) {
   const mobileBtn = document.getElementById("mobileMenuBtn");
   const mainEl = document.querySelector("#appShell > main") || document.querySelector("main");
   const topbarEl = mobileBtn
-    ? mobileBtn.closest(".lg\\:hidden")
-    : document.querySelector("#appShell > .lg\\:hidden");
+    ? mobileBtn.closest(".md\\:hidden")
+    : document.querySelector("#appShell > .md\\:hidden");
 
   if (sidebar) sidebar.classList.add("-translate-x-full");
   if (overlay) overlay.classList.add("hidden");
@@ -243,15 +243,15 @@ function renderDashboard() {
             <div class="text-[11px] text-slate-300">${escapeHtml(prod ? prod.name : "")} • ${escapeHtml(farm.crop)} (${formatHectares(farm.hectares)} ha)</div>
           </td>
           <td data-label="Sector" class="py-3 px-3 text-slate-300 text-xs">${escapeHtml(farm.sector)}</td>
-          <td data-label="Última Fumig." class="py-3 px-3 text-slate-300 text-xs md:whitespace-nowrap">${sched.hasLastSpray ? formatDisplayDate(sched.lastSprayStr) : '<span class="text-slate-400 italic">Sin fumigación registrada</span>'}</td>
-          <td data-label="Próxima Fecha" class="py-3 px-3 md:whitespace-nowrap">
+          <td data-label="Última Fumig." class="py-3 px-3 text-slate-300 text-xs lg:whitespace-nowrap">${sched.hasLastSpray ? formatDisplayDate(sched.lastSprayStr) : '<span class="text-slate-400 italic">Sin fumigación registrada</span>'}</td>
+          <td data-label="Próxima Fecha" class="py-3 px-3 lg:whitespace-nowrap">
             <div class="font-bold ${sched.hasReschedule ? "text-amber-300" : (sched.effectiveDateStr ? "text-white" : "text-slate-400")}">${sched.effectiveDateStr ? formatDisplayDate(sched.effectiveDateStr) : "Sin fumigación registrada"}</div>
             ${sched.hasReschedule && sched.baseDateStr ? `<div class="text-[10px] text-slate-400">Base: ${formatDisplayDate(sched.baseDateStr)}</div>` : ""}
           </td>
-          <td data-label="Estado Fecha" class="py-3 px-3 md:whitespace-nowrap">${dateBadge}</td>
-          <td data-label="Detalle" class="py-3 px-3 md:max-w-xs">${detailText}</td>
-          <td data-label="Acciones" data-cell-actions="true" class="py-3 px-3 md:text-right md:whitespace-nowrap">
-            <div class="flex flex-wrap items-center justify-start md:justify-end gap-1.5">
+          <td data-label="Estado Fecha" class="py-3 px-3 lg:whitespace-nowrap">${dateBadge}</td>
+          <td data-label="Detalle" class="py-3 px-3 lg:max-w-xs">${detailText}</td>
+          <td data-label="Acciones" data-cell-actions="true" class="py-3 px-3 lg:text-right lg:whitespace-nowrap">
+            <div class="flex flex-wrap items-center justify-start lg:justify-end gap-1.5">
               <button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(farm.id)}" class="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 rounded-lg text-[11px] font-bold border border-amber-500/35">
                 <i data-lucide="calendar-clock" class="w-3.5 h-3.5"></i>
                 <span>Reprogramar</span>
@@ -1384,7 +1384,7 @@ function renderSpraysTable() {
 
     return `
       <tr class="hover:bg-slate-900/55 transition-colors">
-        <td data-label="Fecha / Orden" class="py-3 px-3 font-semibold text-white md:whitespace-nowrap">
+        <td data-label="Fecha / Orden" class="py-3 px-3 font-semibold text-white lg:whitespace-nowrap">
           <div>${escapeHtml(sp.date)}</div>
           <div class="text-[10px] font-mono text-brand-blue">${escapeHtml(sp.orderNumber || "")}</div>
         </td>
@@ -1392,7 +1392,7 @@ function renderSpraysTable() {
           <div class="font-bold text-white">${escapeHtml(farm ? farm.name : "Finca eliminada")}</div>
           <div class="text-[11px] text-slate-300">${escapeHtml(prod ? prod.name : "")}</div>
         </td>
-        <td data-label="Hectáreas" class="py-3 px-3 font-bold text-brand-accent md:whitespace-nowrap">${formatHectares(fin.hectares)} ha</td>
+        <td data-label="Hectáreas" class="py-3 px-3 font-bold text-brand-accent lg:whitespace-nowrap">${formatHectares(fin.hectares)} ha</td>
         <td data-label="Producto / Dron" class="py-3 px-3">
           <div class="text-slate-100">${escapeHtml(productsSummary)}</div>
           <div class="text-[11px] text-brand-blue">${escapeHtml(sp.drone)}</div>
@@ -1412,10 +1412,10 @@ function renderSpraysTable() {
         </td>
         <td data-label="Estado / Motivo" class="py-3 px-3">
           <div>${sprayStatusBadge}</div>
-          ${sp.rescheduleDescription ? `<div class="text-[11px] text-amber-200 mt-1 md:max-w-[180px]">${escapeHtml(sp.rescheduleDescription)}</div>` : ""}
+          ${sp.rescheduleDescription ? `<div class="text-[11px] text-amber-200 mt-1 lg:max-w-[180px]">${escapeHtml(sp.rescheduleDescription)}</div>` : ""}
         </td>
-        <td data-label="Acciones" data-cell-actions="true" class="py-3 px-3 md:text-right md:whitespace-nowrap">
-          <div class="flex flex-wrap items-center justify-start md:justify-end gap-1.5">
+        <td data-label="Acciones" data-cell-actions="true" class="py-3 px-3 lg:text-right lg:whitespace-nowrap">
+          <div class="flex flex-wrap items-center justify-start lg:justify-end gap-1.5">
             ${sp.status !== "Realizada" && farm ? `<button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(sp.farmId)}" data-spray-id="${escapeHtml(sp.id)}" class="inline-flex items-center space-x-1 px-2 py-1.5 bg-amber-500/20 text-amber-300 hover:bg-amber-500/35 rounded-lg text-[11px] font-bold border border-amber-500/35"><i data-lucide="calendar-clock" class="w-3.5 h-3.5"></i><span>Reprog.</span></button>` : ""}
             <button type="button" data-action="open-payment-modal" data-spray-id="${escapeHtml(sp.id)}" class="inline-flex items-center space-x-1 px-2 py-1.5 bg-emerald-500/15 text-brand-accent hover:bg-emerald-500/30 rounded-lg text-[11px] font-bold border border-brand-accent/35" title="Ver o registrar abonos">
               <i data-lucide="wallet" class="w-3.5 h-3.5"></i>
@@ -2115,7 +2115,7 @@ function renderBillingTable() {
 
     return `
       <tr class="hover:bg-slate-900/55 transition-colors">
-        <td data-label="Fecha / Orden" class="py-3 px-3 font-medium text-white md:whitespace-nowrap">
+        <td data-label="Fecha / Orden" class="py-3 px-3 font-medium text-white lg:whitespace-nowrap">
           <div>${escapeHtml(sp.date)}</div>
           <div class="text-[10px] font-mono text-brand-blue">${escapeHtml(sp.orderNumber || "")}</div>
         </td>
@@ -2132,8 +2132,8 @@ function renderBillingTable() {
           ${activePaymentsDesc}
         </td>
         <td data-label="Estado" class="py-3 px-3">${renderPayStatusBadgeHtml(fin)}</td>
-        <td data-label="Acciones" data-cell-actions="true" class="py-3 px-3 md:text-right md:whitespace-nowrap">
-          <div class="flex flex-wrap items-center justify-start md:justify-end gap-1.5">
+        <td data-label="Acciones" data-cell-actions="true" class="py-3 px-3 lg:text-right lg:whitespace-nowrap">
+          <div class="flex flex-wrap items-center justify-start lg:justify-end gap-1.5">
             <button type="button" data-action="open-payment-modal" data-spray-id="${escapeHtml(sp.id)}" class="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-brand-blue/20 text-brand-blue border border-brand-blue/40 font-bold rounded-lg text-xs hover:bg-brand-blue/35">
               <i data-lucide="wallet" class="w-3.5 h-3.5"></i>
               <span>${fin.collectibleBalance > 0 ? "Abonar" : "Historial / Abono"}</span>

@@ -268,8 +268,8 @@ function setupMobileSidebarEvents() {
   const overlay = document.getElementById("sidebarOverlay");
   const mainEl = document.querySelector("#appShell > main") || document.querySelector("main");
   const topbarEl = mobileBtn
-    ? mobileBtn.closest(".lg\\:hidden")
-    : document.querySelector("#appShell > .lg\\:hidden");
+    ? mobileBtn.closest(".md\\:hidden")
+    : document.querySelector("#appShell > .md\\:hidden");
 
   syncSidebarInertState();
 
@@ -281,7 +281,7 @@ function setupMobileSidebarEvents() {
     if (mobileBtn) {
       mobileBtn.setAttribute("aria-expanded", "true");
     }
-    if (window.innerWidth < 1024) {
+    if (window.innerWidth < 768) {
       document.documentElement.classList.add("drawer-open");
       document.body.classList.add("drawer-open");
       if (mainEl) {
@@ -315,7 +315,7 @@ function setupMobileSidebarEvents() {
 
   document.addEventListener("keydown", ev => {
     if (ev.key !== "Tab") return;
-    if (window.innerWidth >= 1024 || !sidebar || sidebar.classList.contains("-translate-x-full")) {
+    if (window.innerWidth >= 768 || !sidebar || sidebar.classList.contains("-translate-x-full")) {
       return;
     }
     const focusableSelector = [
@@ -349,7 +349,7 @@ function setupMobileSidebarEvents() {
   });
 
   window.addEventListener("resize", () => {
-    if (window.innerWidth >= 1024) {
+    if (window.innerWidth >= 768) {
       closeMobileSidebar(false);
     } else {
       syncSidebarInertState();
@@ -390,7 +390,7 @@ function setupModalAccessibility() {
       }
     }
     const sidebar = document.getElementById("sidebar");
-    if (window.innerWidth < 1024 && sidebar && !sidebar.classList.contains("-translate-x-full")) {
+    if (window.innerWidth < 768 && sidebar && !sidebar.classList.contains("-translate-x-full")) {
       closeMobileSidebar(true);
     }
   });

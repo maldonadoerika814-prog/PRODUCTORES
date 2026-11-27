@@ -24,7 +24,7 @@ body {
   min-height: 100vh;
 }
 
-@media screen and (max-width: 1023px) {
+@media screen and (max-width: 767px) {
   html.drawer-open,
   body.drawer-open {
     overflow: hidden;
@@ -110,6 +110,11 @@ textarea:focus-visible {
   border: 1px solid var(--glass-border);
   box-shadow: 0 14px 36px -12px rgba(0, 0, 0, 0.78), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
+}
+
+#sidebar {
+  height: 100vh;
+  height: 100dvh;
 }
 
 .glass-sidebar {
@@ -227,20 +232,20 @@ textarea:focus-visible {
   background: #00ff88;
 }
 
-@media screen and (max-width: 1023px) {
-  #appBackgroundLayer {
-    background-attachment: scroll;
-  }
-}
-
 @media screen and (max-width: 767px) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
   select,
   textarea {
     font-size: 16px !important;
   }
+}
 
-  /* Tablas operativas apiladas como tarjetas glass en pantallas móviles (<768px) */
+@media screen and (max-width: 1023px) {
+  #appBackgroundLayer {
+    background-attachment: scroll;
+  }
+
+  /* Tablas operativas apiladas como tarjetas glass en móvil y ventanas <1024px (con barra lateral fija) */
   table.responsive-table,
   table.responsive-table tbody {
     display: block;

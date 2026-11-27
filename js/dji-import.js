@@ -861,7 +861,7 @@ function renderDjiReviewTable() {
     const selectHtml = row.isInvalidZeroArea
       ? `<span class="text-xs text-rose-300 italic">No registrable (0.00 ha)</span>`
       : `
-        <select data-change="dji-row-farm" data-row-id="${escapeHtml(row.rowId)}" class="w-full md:min-w-[220px] px-2.5 py-2 rounded-xl bg-slate-900 border ${isUnassigned ? "border-amber-500/50 text-amber-200" : "border-brand-accent/45 text-white"} text-xs font-semibold">
+        <select data-change="dji-row-farm" data-row-id="${escapeHtml(row.rowId)}" class="w-full lg:min-w-[220px] px-2.5 py-2 rounded-xl bg-slate-900 border ${isUnassigned ? "border-amber-500/50 text-amber-200" : "border-brand-accent/45 text-white"} text-xs font-semibold">
           <option value="">-- Sin asignar (elegir Productor / Finca) --</option>
           ${farmOptionsHtml}
         </select>
@@ -873,10 +873,10 @@ function renderDjiReviewTable() {
 
     return `
       <tr class="hover:bg-slate-900/55 transition-colors ${row.isInvalidZeroArea ? "opacity-60 bg-rose-950/20" : (row.isSplitChild ? "bg-slate-900/35" : "")}" data-dji-row="${escapeHtml(row.rowId)}">
-        <td data-label="Incluir" data-cell-inline="true" class="py-3 px-3 md:text-center">
+        <td data-label="Incluir" data-cell-inline="true" class="py-3 px-3 lg:text-center">
           <input type="checkbox" ${row.included ? "checked" : ""} ${(isUnassigned || row.isInvalidZeroArea) ? "disabled" : ""} data-change="dji-row-included" data-row-id="${escapeHtml(row.rowId)}" aria-label="${includeAriaLabel}" class="w-4 h-4 accent-emerald-400 cursor-pointer disabled:opacity-40">
         </td>
-        <td data-label="Fecha / Horario" class="py-3 px-3 md:whitespace-nowrap">
+        <td data-label="Fecha / Horario" class="py-3 px-3 lg:whitespace-nowrap">
           <div class="font-bold text-white">${escapeHtml(row.dateStr)}</div>
           <div class="text-[11px] text-slate-400">${formatDisplayDate(row.dateStr, true)}</div>
           ${timeRangeShort ? `<div class="text-[11px] font-mono text-brand-blue mt-0.5" title="${escapeHtml(timeRangeFull)}">${escapeHtml(timeRangeShort)}</div>` : ""}
@@ -890,12 +890,12 @@ function renderDjiReviewTable() {
           ${pilotDroneMeta.length > 0 ? `<div class="text-[11px] text-slate-400 mt-1">${pilotDroneMeta.join(" • ")}</div>` : ""}
           ${splitActionHtml}
         </td>
-        <td data-label="Vuelos" class="py-3 px-3 md:whitespace-nowrap">
+        <td data-label="Vuelos" class="py-3 px-3 lg:whitespace-nowrap">
           <div class="font-bold text-white">${row.flightCount} ${row.flightCount === 1 ? "vuelo" : "vuelos"}</div>
           <div class="text-[11px] text-slate-400">${row.totalMu.toFixed(2)} mu</div>
           ${row.hasProductAmount ? `<div class="text-[11px] text-brand-blue font-mono">${row.totalProductAmount.toFixed(2)} L/Kg</div>` : ""}
         </td>
-        <td data-label="Hectáreas / Monto" class="py-3 px-3 md:whitespace-nowrap">
+        <td data-label="Hectáreas / Monto" class="py-3 px-3 lg:whitespace-nowrap">
           <div class="font-extrabold ${row.isInvalidZeroArea ? "text-rose-400" : "text-brand-accent"}">${formatHectares(row.hectares)} ha</div>
           <div class="text-[11px] text-slate-300">${formatMoney(estAmount)}</div>
         </td>

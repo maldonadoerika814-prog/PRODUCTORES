@@ -7,7 +7,7 @@
 "use strict";
 
 function setupDelegatedUiEvents() {
-  // 1. Delegación de clics (botones y acciones interactivas)
+  // 1. Delegación de clics
   document.addEventListener("click", ev => {
     const actionEl = ev.target.closest("[data-action]");
     if (!actionEl) return;
@@ -94,6 +94,12 @@ function setupDelegatedUiEvents() {
       case "mark-pilot-paid":
         requestMarkPilotAsPaid(actionEl.dataset.sprayId || "");
         break;
+      case "unmark-pilot-paid":
+        requestUnmarkPilotAsPaid(actionEl.dataset.sprayId || "");
+        break;
+      case "void-payment":
+        requestVoidPaymentMovement(actionEl.dataset.sprayId || "", actionEl.dataset.paymentId || "");
+        break;
       case "add-spray-product":
         addProductRowToSprayForm();
         break;
@@ -138,7 +144,7 @@ function setupDelegatedUiEvents() {
     }
   });
 
-  // 2. Delegación de eventos change (selects, checkboxes y carga de archivos)
+  // 2. Delegación de eventos change
   document.addEventListener("change", ev => {
     const changeEl = ev.target.closest("[data-change]");
     if (!changeEl) return;
@@ -186,12 +192,15 @@ function setupDelegatedUiEvents() {
       case "spray-pay-status":
         togglePartialPaidField();
         break;
+      case "payment-modal-method":
+        toggleQuickPaymentBankField();
+        break;
       default:
         break;
     }
   });
 
-  // 3. Delegación de eventos input (búsqueda en vivo, sliders y cálculos en tiempo real)
+  // 3. Delegación de eventos input
   document.addEventListener("input", ev => {
     const inputEl = ev.target.closest("[data-input]");
     if (!inputEl) return;
@@ -201,6 +210,7 @@ function setupDelegatedUiEvents() {
         filterDailyCards();
         break;
       case "daily-ha":
+      case "daily-discount":
         recalcDailyCardAmounts(inputEl);
         break;
       case "search-producers":
@@ -216,14 +226,15 @@ function setupDelegatedUiEvents() {
         updatePhoneFormatPreview();
         break;
       case "spray-hectares":
-        onSprayHectaresChanged();
+      case "spray-pricing":
+        onSprayPricingChanged();
         break;
       default:
         break;
     }
   });
 
-  // 4. Delegación de envíos de formularios (submit)
+  // 4. Delegación de envíos de formularios
   document.addEventListener("submit", ev => {
     const formEl = ev.target.closest("form[data-submit]");
     if (!formEl) return;
@@ -255,17 +266,95 @@ function setupMobileSidebarEvents() {
   const mobileCloseBtn = document.getElementById("mobileCloseSidebarBtn");
   const sidebar = document.getElementById("sidebar");
   const overlay = document.getElementById("sidebarOverlay");
+  const mainEl = document.querySelector("#appShell > main") || document.querySelector("main");
+  const topbarEl = mobileBtn
+    ? mobileBtn.closest(".lg\\:hidden")
+    : document.querySelector("#appShell > .lg\\:hidden");
+
+  syncSidebarInertState();
+
+  const openMobileSidebar = () => {
+    if (!sidebar || !overlay) return;
+    sidebar.classList.remove("-translate-x-full");
+    overlay.classList.remove("hidden");
+    syncSidebarInertState();
+    if (mobileBtn) {
+      mobileBtn.setAttribute("aria-expanded", "true");
+    }
+    if (window.innerWidth < 1024) {
+      document.documentElement.classList.add("drawer-open");
+      document.body.classList.add("drawer-open");
+      if (mainEl) {
+        mainEl.inert = true;
+        mainEl.setAttribute("inert", "");
+      }
+      if (topbarEl) {
+        topbarEl.inert = true;
+        topbarEl.setAttribute("inert", "");
+      }
+      if (mobileCloseBtn) {
+        mobileCloseBtn.focus();
+      }
+    }
+  };
 
   if (mobileBtn && sidebar && overlay) {
     mobileBtn.addEventListener("click", () => {
-      sidebar.classList.toggle("-translate-x-full");
-      overlay.classList.toggle("hidden");
+      const isCurrentlyOpen = !sidebar.classList.contains("-translate-x-full");
+      if (isCurrentlyOpen) {
+        closeMobileSidebar(true);
+      } else {
+        openMobileSidebar();
+      }
     });
-    overlay.addEventListener("click", closeMobileSidebar);
+    overlay.addEventListener("click", () => closeMobileSidebar(true));
   }
   if (mobileCloseBtn) {
-    mobileCloseBtn.addEventListener("click", closeMobileSidebar);
+    mobileCloseBtn.addEventListener("click", () => closeMobileSidebar(true));
   }
+
+  document.addEventListener("keydown", ev => {
+    if (ev.key !== "Tab") return;
+    if (window.innerWidth >= 1024 || !sidebar || sidebar.classList.contains("-translate-x-full")) {
+      return;
+    }
+    const focusableSelector = [
+      "a[href]",
+      "button:not([disabled])",
+      "input:not([disabled]):not([type='hidden'])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      "[tabindex]:not([tabindex='-1'])"
+    ].join(", ");
+    const focusables = Array.from(sidebar.querySelectorAll(focusableSelector)).filter(
+      el => !el.classList.contains("hidden") && el.getClientRects().length > 0
+    );
+    if (focusables.length === 0) return;
+
+    const firstEl = focusables[0];
+    const lastEl = focusables[focusables.length - 1];
+    const activeEl = document.activeElement;
+
+    if (ev.shiftKey) {
+      if (activeEl === firstEl || !sidebar.contains(activeEl)) {
+        ev.preventDefault();
+        lastEl.focus();
+      }
+    } else {
+      if (activeEl === lastEl || !sidebar.contains(activeEl)) {
+        ev.preventDefault();
+        firstEl.focus();
+      }
+    }
+  });
+
+  window.addEventListener("resize", () => {
+    if (window.innerWidth >= 1024) {
+      closeMobileSidebar(false);
+    } else {
+      syncSidebarInertState();
+    }
+  });
 }
 
 function setupModalAccessibility() {
@@ -299,6 +388,10 @@ function setupModalAccessibility() {
         closeModal(id);
         return;
       }
+    }
+    const sidebar = document.getElementById("sidebar");
+    if (window.innerWidth < 1024 && sidebar && !sidebar.classList.contains("-translate-x-full")) {
+      closeMobileSidebar(true);
     }
   });
 }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>AgroDrone - Control de Fumigación y Secretaría</title>
+  <title>AgroDrone - Gestión Empresarial de Fumigación Agrícola</title>
 
   <!-- Tailwind CSS CDN (versión fija) + tema de marca externo -->
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
@@ -14,15 +14,16 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 
-  <!-- Hoja de estilos principal (fondo.jpg, vidrio, móvil y PDF blanco) -->
+  <!-- Hoja de estilos principal -->
   <link rel="stylesheet" href="css/styles.css">
 
-  <!-- Librerías externas con versión fija -->
-  <script src="https://cdn.jsdelivr.net/npm/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
+  <!-- Iconografía local Lucide v1.81.0 y librerías externas con versión fija -->
+  <script src="js/vendor/lucide.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
 
-  <!-- Módulos JavaScript de la aplicación -->
+  <!-- Módulos JavaScript de la aplicación (orden garantizado con defer) -->
+  <script src="js/finance.js" defer></script>
   <script src="js/state.js" defer></script>
   <script src="js/views.js" defer></script>
   <script src="js/dji-import.js" defer></script>
@@ -36,13 +37,13 @@
   <div id="appBackgroundOverlay" aria-hidden="true"></div>
 
   <!-- Contenedor de notificaciones Toast -->
-  <div id="toastContainer" class="fixed bottom-4 right-4 z-[100] space-y-2 max-w-sm w-[calc(100%-2rem)] pointer-events-none"></div>
+  <div id="toastContainer" class="fixed bottom-4 right-3 sm:right-4 z-[100] space-y-2 max-w-sm w-[calc(100%-1.5rem)] sm:w-[calc(100%-2rem)] pointer-events-none"></div>
 
   <!-- Contenedor principal de la aplicación (se oculta limpiamente al imprimir PDF) -->
-  <div id="appShell" class="min-h-screen flex flex-col md:flex-row w-full max-w-full overflow-x-hidden">
+  <div id="appShell" class="min-h-screen flex flex-col lg:flex-row w-full max-w-full overflow-x-hidden">
 
-    <!-- Barra superior móvil -->
-    <div class="md:hidden flex items-center justify-between px-4 py-3 glass-sidebar border-b border-white/10 sticky top-0 z-40 w-full">
+    <!-- Barra superior móvil y tablet (<1024px) -->
+    <div class="lg:hidden topbar-safe flex items-center justify-between px-3.5 sm:px-5 py-3 glass-sidebar border-b border-white/10 sticky top-0 z-40 w-full">
       <div class="flex items-center space-x-2.5 min-w-0">
         <div class="p-2 bg-gradient-to-tr from-brand-accent to-brand-blue rounded-xl text-black shadow-lg shadow-brand-accent/25 shrink-0">
           <i data-lucide="plane" class="w-5 h-5 stroke-[2.5]"></i>
@@ -50,7 +51,7 @@
         <div class="min-w-0">
           <div class="flex items-center space-x-1.5">
             <span class="font-extrabold text-base tracking-tight text-white">Agro<span class="text-brand-accent">Drone</span></span>
-            <span class="text-[10px] px-1.5 py-0.5 rounded bg-brand-accent/15 text-brand-accent font-bold">V4.2</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-brand-accent/15 text-brand-accent font-bold">V5.0</span>
           </div>
           <p id="mobileCurrentTabLabel" class="text-[11px] text-slate-300 truncate">Panel Principal</p>
         </div>
@@ -59,14 +60,14 @@
         <button type="button" data-action="export-json" class="p-2.5 text-brand-accent hover:bg-brand-accent/15 rounded-xl border border-brand-accent/30 bg-slate-900/60" title="Descargar respaldo JSON">
           <i data-lucide="download" class="w-5 h-5"></i>
         </button>
-        <button type="button" id="mobileMenuBtn" aria-label="Abrir menú" class="p-2.5 text-slate-200 hover:text-brand-accent rounded-xl border border-brand-border bg-slate-900/60">
+        <button type="button" id="mobileMenuBtn" aria-label="Abrir menú" aria-expanded="false" aria-controls="sidebar" class="p-2.5 text-slate-200 hover:text-brand-accent rounded-xl border border-brand-border bg-slate-900/60">
           <i data-lucide="menu" class="w-5 h-5"></i>
         </button>
       </div>
     </div>
 
     <!-- Barra lateral de navegación -->
-    <aside id="sidebar" class="fixed md:sticky md:top-0 inset-y-0 left-0 z-50 w-72 md:w-64 md:h-screen glass-sidebar border-r border-white/10 transform -translate-x-full md:translate-x-0 transition-transform duration-300 flex flex-col justify-between shrink-0 overflow-y-auto">
+    <aside id="sidebar" class="fixed lg:sticky lg:top-0 inset-y-0 left-0 z-50 w-72 max-w-[86vw] lg:max-w-none lg:w-64 2xl:w-72 lg:h-screen glass-sidebar border-r border-white/10 transform -translate-x-full lg:translate-x-0 transition-transform duration-300 flex flex-col justify-between shrink-0 overflow-y-auto">
       <div>
         <!-- Encabezado de marca -->
         <div class="flex items-center justify-between p-5 border-b border-white/10">
@@ -77,12 +78,12 @@
             <div>
               <div class="flex items-center space-x-1.5">
                 <h1 class="font-extrabold text-xl tracking-tight text-white">Agro<span class="text-brand-accent">Drone</span></h1>
-                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-brand-accent/15 text-brand-accent border border-brand-accent/30">V4.2</span>
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-brand-accent/15 text-brand-accent border border-brand-accent/30">V5.0</span>
               </div>
-              <p class="text-[11px] text-slate-300 font-medium">Secretaría y Piloto</p>
+              <p class="text-[11px] text-slate-300 font-medium">Gestión Empresarial</p>
             </div>
           </div>
-          <button type="button" id="mobileCloseSidebarBtn" aria-label="Cerrar menú" class="md:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">
+          <button type="button" id="mobileCloseSidebarBtn" aria-label="Cerrar menú" class="lg:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">
             <i data-lucide="x" class="w-5 h-5"></i>
           </button>
         </div>
@@ -124,7 +125,7 @@
         </nav>
       </div>
 
-      <!-- Pie de barra lateral: Temporada activa y estado de respaldo -->
+      <!-- Pie de barra lateral -->
       <div class="p-4 border-t border-white/10 bg-black/30 space-y-2.5">
         <div class="flex items-center justify-between text-xs text-slate-300">
           <span class="flex items-center"><i data-lucide="map-pin" class="w-3.5 h-3.5 mr-1.5 text-brand-blue"></i> El Oro, Ecuador</span>
@@ -147,13 +148,13 @@
       </div>
     </aside>
 
-    <!-- Fondo oscuro del menú móvil -->
-    <div id="sidebarOverlay" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 hidden md:hidden"></div>
+    <!-- Fondo oscuro del menú móvil/tablet -->
+    <div id="sidebarOverlay" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 hidden lg:hidden"></div>
 
     <!-- Área de contenido principal -->
-    <main class="flex-1 min-w-0 p-4 md:p-8 overflow-y-auto max-w-7xl mx-auto w-full space-y-5">
+    <main class="flex-1 min-w-0 px-3.5 py-4 sm:px-6 sm:py-6 lg:px-8 lg:py-8 2xl:px-10 max-w-[1680px] mx-auto w-full space-y-5">
 
-      <!-- Aviso de respaldo pendiente (si hace días que no se respalda) -->
+      <!-- Aviso de respaldo pendiente -->
       <div id="backupReminderBanner" class="hidden glass-card neon-glow-amber px-4 py-3.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div class="flex items-start sm:items-center space-x-3">
           <div class="p-2 rounded-xl bg-amber-500/20 text-amber-300 shrink-0">
@@ -179,7 +180,7 @@
       <header class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-white/15">
         <div>
           <h2 id="pageTitle" class="text-2xl font-extrabold text-white tracking-tight">Panel Principal</h2>
-          <p id="pageSubtitle" class="text-sm text-slate-300">Control de fumigaciones, frecuencias por temporada, cobros y avisos por WhatsApp</p>
+          <p id="pageSubtitle" class="text-sm text-slate-300">Control exacto de fumigaciones, abonos auditables, devengados vs. estimados y WhatsApp</p>
         </div>
 
         <div class="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
@@ -206,8 +207,8 @@
               <i data-lucide="info" class="w-5 h-5"></i>
             </div>
             <div class="text-xs">
-              <div class="font-bold text-brand-blue">Datos de ejemplo activos</div>
-              <p class="text-slate-200 mt-0.5">Actualmente hay productores y fumigaciones de demostración cargados. Cuando quieras empezar con datos reales, puedes vaciarlos sin perder tu Configuración.</p>
+              <div class="font-bold text-brand-blue">Datos de demostración activos</div>
+              <p class="text-slate-200 mt-0.5">Actualmente hay productores y fumigaciones ficticias de ejemplo. Cuando quieras empezar con tus datos reales, vacíalos sin perder tu Configuración.</p>
             </div>
           </div>
           <div class="flex items-center space-x-2 shrink-0">
@@ -219,7 +220,7 @@
         </div>
 
         <!-- 5 KPIs principales -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 tabular-nums">
           <div class="glass-card glass-card-hover neon-glow-blue p-5 rounded-2xl">
             <div class="flex items-center justify-between text-slate-300 mb-2">
               <span class="text-[11px] font-bold uppercase tracking-wider">Productores</span>
@@ -227,7 +228,7 @@
                 <i data-lucide="users" class="w-4 h-4"></i>
               </div>
             </div>
-            <div id="kpiProducersCount" class="text-3xl font-black text-white">0</div>
+            <div id="kpiProducersCount" class="text-2xl sm:text-3xl font-black text-white">0</div>
             <span id="kpiFarmsCount" class="text-xs text-brand-blue font-medium">0 fincas registradas</span>
           </div>
 
@@ -238,7 +239,7 @@
                 <i data-lucide="layers" class="w-4 h-4"></i>
               </div>
             </div>
-            <div id="kpiTotalHectares" class="text-3xl font-black text-brand-accent">0.00 ha</div>
+            <div id="kpiTotalHectares" class="text-2xl sm:text-3xl font-black text-brand-accent">0.00 ha</div>
             <span class="text-xs text-slate-300">Fumigaciones realizadas</span>
           </div>
 
@@ -246,10 +247,10 @@
             <div class="flex items-center justify-between text-slate-300 mb-2">
               <span class="text-[11px] font-bold uppercase tracking-wider">Fumig. Mes</span>
               <div class="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-400">
-                <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+                <i data-lucide="circle-check" class="w-4 h-4"></i>
               </div>
             </div>
-            <div id="kpiMonthSprays" class="text-3xl font-black text-white">0</div>
+            <div id="kpiMonthSprays" class="text-2xl sm:text-3xl font-black text-white">0</div>
             <span id="kpiMonthLabel" class="text-xs text-slate-300">En mes actual</span>
           </div>
 
@@ -260,23 +261,23 @@
                 <i data-lucide="dollar-sign" class="w-4 h-4"></i>
               </div>
             </div>
-            <div id="kpiPendingAmount" class="text-3xl font-black text-amber-400">$0.00</div>
-            <span id="kpiPendingCount" class="text-xs text-slate-300">0 cuentas con saldo</span>
+            <div id="kpiPendingAmount" class="text-2xl sm:text-3xl font-black text-amber-400">$0.00</div>
+            <span id="kpiPendingCount" class="text-xs text-slate-300">0 cuentas exigibles</span>
           </div>
 
           <div class="glass-card glass-card-hover neon-glow-red p-5 rounded-2xl">
             <div class="flex items-center justify-between text-slate-300 mb-2">
               <span class="text-[11px] font-bold uppercase tracking-wider">Vencidas</span>
               <div class="p-1.5 rounded-lg bg-rose-500/15 text-rose-400">
-                <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+                <i data-lucide="triangle-alert" class="w-4 h-4"></i>
               </div>
             </div>
-            <div id="kpiExpiredCount" class="text-3xl font-black text-rose-400">0</div>
+            <div id="kpiExpiredCount" class="text-2xl sm:text-3xl font-black text-rose-400">0</div>
             <span class="text-xs text-rose-300/90 font-medium">Atrasadas al día de hoy</span>
           </div>
         </div>
 
-        <!-- Pendientes de hoy y de la semana -->
+        <!-- Pendientes de hoy y de la semana (Devengado vs Estimado) -->
         <div class="glass-card neon-glow-amber p-5 sm:p-6 rounded-2xl space-y-4">
           <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div class="flex items-center space-x-3">
@@ -285,18 +286,22 @@
               </div>
               <div>
                 <h3 class="text-lg font-extrabold text-white">Pendientes de Hoy y de la Semana</h3>
-                <p class="text-xs text-slate-300">A quién toca fumigar según fecha base o reprogramada, atrasados, cobros pendientes y depósito al piloto</p>
+                <p class="text-xs text-slate-300">Separación contable clara entre saldos realmente <strong>devengados</strong> (vuelos realizados) y montos <strong>estimados</strong> (programados)</p>
               </div>
             </div>
 
-            <div class="flex flex-wrap items-center gap-3">
+            <div class="flex flex-wrap items-center gap-3 tabular-nums">
               <div class="px-3.5 py-2 rounded-xl bg-slate-950/70 border border-amber-500/35">
-                <span class="block text-[10px] uppercase font-bold text-slate-400">Por Cobrar (Productores)</span>
+                <span class="block text-[10px] uppercase font-bold text-slate-400">Por Cobrar (Devengado)</span>
                 <span id="pendientesPorCobrar" class="text-base font-black text-amber-400">$0.00</span>
               </div>
               <div class="px-3.5 py-2 rounded-xl bg-slate-950/70 border border-brand-blue/35">
-                <span class="block text-[10px] uppercase font-bold text-slate-400">Por Depositar al Piloto</span>
+                <span class="block text-[10px] uppercase font-bold text-slate-400">Piloto por Depositar (Devengado)</span>
                 <span id="pendientesDepositoPiloto" class="text-base font-black text-brand-blue">$0.00</span>
+              </div>
+              <div class="px-3.5 py-2 rounded-xl bg-slate-950/70 border border-slate-600/50" title="Órdenes Pendientes o Reprogramadas aún no ejecutadas">
+                <span class="block text-[10px] uppercase font-bold text-slate-400">Estimado en Programadas</span>
+                <span id="pendientesEstimadoInfo" class="text-xs font-bold text-slate-300">$0.00 cliente • $0.00 piloto</span>
               </div>
             </div>
           </div>
@@ -308,7 +313,7 @@
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div class="glass-card p-5 rounded-2xl">
             <h4 class="text-sm font-bold text-white mb-4 flex items-center">
-              <i data-lucide="bar-chart-3" class="w-4 h-4 mr-2 text-brand-accent"></i> Hectáreas Fumigadas por Mes
+              <i data-lucide="chart-column" class="w-4 h-4 mr-2 text-brand-accent"></i> Hectáreas Fumigadas por Mes (Realizadas)
             </h4>
             <div class="chart-box">
               <canvas id="chartHectaresMonth"></canvas>
@@ -317,7 +322,7 @@
 
           <div class="glass-card p-5 rounded-2xl">
             <h4 class="text-sm font-bold text-white mb-4 flex items-center">
-              <i data-lucide="pie-chart" class="w-4 h-4 mr-2 text-brand-blue"></i> Monto Cobrado por Método de Pago
+              <i data-lucide="chart-pie" class="w-4 h-4 mr-2 text-brand-blue"></i> Recaudo Real por Método de Abono vs. Por Cobrar
             </h4>
             <div class="chart-box">
               <canvas id="chartPaymentMethods"></canvas>
@@ -340,7 +345,7 @@
           </div>
 
           <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse text-xs md:text-sm min-w-[740px]">
+            <table class="responsive-table w-full text-left border-collapse text-xs md:text-sm md:min-w-[740px] tabular-nums">
               <thead>
                 <tr class="border-b border-brand-border text-slate-300 font-semibold uppercase text-[11px] tracking-wider">
                   <th class="py-3 px-3">Productor / Finca</th>
@@ -370,7 +375,7 @@
               </div>
               <div>
                 <h3 class="text-lg font-extrabold text-white">Registrar Fumigados del Día</h3>
-                <p class="text-xs text-slate-300">Elige la fecha, marca con casillas las fincas fumigadas ese día y completa sus datos para registrarlas todas juntas.</p>
+                <p class="text-xs text-slate-300">Elige la fecha, marca con casillas las fincas fumigadas ese día y completa sus datos (incluyendo descuentos opcionales) para registrarlas juntas.</p>
               </div>
             </div>
 
@@ -389,7 +394,7 @@
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-950/65 border border-brand-border">
             <div class="text-xs text-slate-200 flex flex-wrap items-center gap-2.5">
               <span id="dailySelectedCounter" class="px-2.5 py-1 rounded-lg bg-brand-accent/20 text-brand-accent font-extrabold">0 fincas marcadas</span>
-              <span class="text-slate-300">Al guardar se crea una fumigación realizada por cada finca marcada y se recalcula su próxima fecha.</span>
+              <span class="text-slate-300">Al guardar se crea una fumigación realizada por cada finca marcada, con asiento contable exacto y recálculo de próxima fecha.</span>
             </div>
             <div class="flex flex-wrap items-center gap-2 shrink-0">
               <button type="button" data-action="switch-tab" data-tab="dji" class="px-4 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-brand-blue border border-brand-blue/35 font-bold text-xs flex items-center justify-center space-x-1.5">
@@ -420,7 +425,7 @@
               <div>
                 <h3 class="text-lg font-extrabold text-white">Importar vuelos DJI (SmartFarm)</h3>
                 <p class="text-xs text-slate-300">
-                  Carga el Excel de <strong>DJI SmartFarm (Task History)</strong>, hoja <code class="text-brand-blue">flight record</code>. Agrupa por fecha + <code>Location</code>, convierte <code>mu</code> a hectáreas (<code>mu / 15</code>), lee piloto/dron/volumen y recuerda tus ubicaciones y <code>Plot ID</code>.
+                  Carga el Excel de <strong>DJI SmartFarm (Task History)</strong>, hoja <code class="text-brand-blue">flight record</code>. Convierte <code>mu ÷ 15</code> con precisión exacta (hasta 4 decimales internos sin inflar micro-lotes), bloquea áreas cero y recuerda ubicaciones/<code>Plot ID</code>.
                 </p>
               </div>
             </div>
@@ -434,15 +439,14 @@
             </div>
           </div>
 
-          <!-- Reglas y columnas esperadas -->
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
             <div class="p-3 rounded-xl bg-slate-950/60 border border-brand-border">
               <div class="text-[10px] font-bold uppercase text-brand-blue mb-1">Hoja y Columnas</div>
               <p class="text-slate-300">Hoja <strong>flight record</strong>: <span class="text-slate-100">Flight time</span>, <span class="text-slate-100">Location</span>, <span class="text-slate-100">Serial Number</span>, <span class="text-slate-100">Plot ID</span>, <span class="text-slate-100">Field Name</span>, <span class="text-slate-100">Sprayed area</span>. Opcionales: <span class="text-slate-100">Pliot Name</span>, <span class="text-slate-100">Aircraft name</span>, <span class="text-slate-100">Total Amount(L/Kg)</span>.</p>
             </div>
             <div class="p-3 rounded-xl bg-slate-950/60 border border-brand-border">
-              <div class="text-[10px] font-bold uppercase text-brand-accent mb-1">Agrupación y Duplicados</div>
-              <p class="text-slate-300">Agrupa por <strong>Fecha + Location</strong> (o por Plot ID si falta Location). Hectáreas = <strong>mu ÷ 15</strong> (2 decimales). Clave única por vuelo: <strong>Flight time + Serial Number</strong>.</p>
+              <div class="text-[10px] font-bold uppercase text-brand-accent mb-1">Precisión Exacta y Duplicados</div>
+              <p class="text-slate-300">Agrupa por <strong>Fecha + Location</strong> (o Plot ID). Hectáreas = <strong>mu ÷ 15</strong> exacto (sin inflar ceros a 1 ha). Clave única por vuelo: <strong>Flight time + Serial Number</strong>.</p>
             </div>
             <div class="p-3 rounded-xl bg-slate-950/60 border border-brand-border">
               <div class="text-[10px] font-bold uppercase text-amber-300 mb-1">Valores al Registrar</div>
@@ -450,14 +454,10 @@
             </div>
           </div>
 
-          <!-- Caja de errores de formato / columnas faltantes -->
           <div id="djiErrorBox" class="hidden p-4 rounded-xl bg-rose-950/50 border border-rose-500/50 text-xs text-rose-200 space-y-1"></div>
-
-          <!-- Caja de advertencias (ej. falta columna Location) -->
           <div id="djiWarningBox" class="hidden p-3.5 rounded-xl bg-amber-950/50 border border-amber-500/50 text-xs text-amber-200 space-y-1"></div>
 
-          <!-- Resumen de lectura / registro -->
-          <div id="djiSummaryBox" class="hidden grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div id="djiSummaryBox" class="hidden grid grid-cols-2 sm:grid-cols-5 gap-3 tabular-nums">
             <div class="p-3.5 rounded-xl bg-slate-950/75 border border-brand-border">
               <div class="text-[10px] font-bold uppercase text-slate-400">Vuelos leídos</div>
               <div id="djiSumFlightsRead" class="text-2xl font-black text-white mt-0.5">0</div>
@@ -480,25 +480,24 @@
             </div>
           </div>
 
-          <!-- Tabla de revisión (agrupada por fecha y Location) -->
           <div id="djiReviewWrapper" class="hidden space-y-4">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-950/70 border border-brand-border">
               <div class="text-xs text-slate-200">
                 <strong id="djiLoadedFileName" class="text-brand-blue">Archivo cargado</strong>
                 <span id="djiReviewHint" class="block text-slate-400 mt-0.5">Revisa las filas agrupadas por fecha y ubicación, separa por lote si necesitas, asigna productor/finca y presiona Registrar.</span>
               </div>
-              <div class="flex items-center space-x-2 shrink-0">
-                <button type="button" data-action="clear-dji-preview" class="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold">
-                  Limpiar vista
+              <div class="flex flex-wrap items-center gap-2 shrink-0">
+                <button type="button" data-action="clear-dji-preview" class="inline-flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold">
+                  <i data-lucide="eraser" class="w-3.5 h-3.5"></i>
+                  <span>Limpiar vista</span>
                 </button>
                 <button type="button" id="djiRegisterBtn" data-action="register-dji-rows" class="neon-btn px-5 py-2.5 rounded-xl font-extrabold text-xs flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                  <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+                  <i data-lucide="circle-check" class="w-4 h-4"></i>
                   <span>Registrar</span>
                 </button>
               </div>
             </div>
 
-            <!-- Campos opcionales de producto y dosis para todas las filas -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 rounded-xl bg-slate-950/60 border border-brand-accent/25">
               <div>
                 <label for="djiProductNameInput" class="block text-[10px] font-bold uppercase text-brand-accent mb-1">Producto aplicado (opcional)</label>
@@ -511,7 +510,7 @@
             </div>
 
             <div class="overflow-x-auto">
-              <table class="w-full text-left border-collapse text-xs md:text-sm min-w-[820px]">
+              <table class="responsive-table w-full text-left border-collapse text-xs md:text-sm md:min-w-[820px] tabular-nums">
                 <thead>
                   <tr class="border-b border-brand-border text-slate-300 font-semibold uppercase text-[11px] tracking-wider">
                     <th class="py-3 px-3 w-10 text-center">Inc.</th>
@@ -527,7 +526,6 @@
             </div>
           </div>
 
-          <!-- Memorias guardadas (Location y Plot ID) -->
           <div class="pt-4 border-t border-white/10 space-y-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -578,7 +576,7 @@
           </button>
         </div>
 
-        <div id="producersCardsGrid" class="grid grid-cols-1 lg:grid-cols-2 gap-5"></div>
+        <div id="producersCardsGrid" class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-5"></div>
       </section>
 
       <!-- ===================================================== -->
@@ -588,7 +586,7 @@
         <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <h3 class="text-lg font-bold text-white">Historial y Registro de Fumigaciones</h3>
-            <p class="text-xs text-slate-300">Control de aplicaciones (Realizada, Pendiente o Reprogramada), productos con dosis, pagos y PDF</p>
+            <p class="text-xs text-slate-300">Control de aplicaciones, descuentos, IVA, abonos auditables y distinción entre pago a piloto <strong>devengado</strong> vs. <strong>estimado</strong></p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <select id="filterSprayStatusSelect" data-change="filter-sprays" class="px-3 py-2.5 rounded-xl bg-slate-950/80 border border-brand-border text-white text-xs font-semibold">
@@ -610,15 +608,15 @@
 
         <div class="glass-card p-4 sm:p-6 rounded-2xl">
           <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse text-xs md:text-sm min-w-[820px]">
+            <table class="responsive-table w-full text-left border-collapse text-xs md:text-sm md:min-w-[820px] tabular-nums">
               <thead>
                 <tr class="border-b border-brand-border text-slate-300 font-semibold uppercase text-[11px] tracking-wider">
                   <th class="py-3 px-3">Fecha / Orden</th>
                   <th class="py-3 px-3">Productor / Finca</th>
                   <th class="py-3 px-3">Hectáreas</th>
                   <th class="py-3 px-3">Producto / Dron</th>
-                  <th class="py-3 px-3">Piloto</th>
-                  <th class="py-3 px-3">Monto / Pago</th>
+                  <th class="py-3 px-3">Piloto (Deveng. / Est.)</th>
+                  <th class="py-3 px-3">Monto / Abonos</th>
                   <th class="py-3 px-3">Estado / Motivo</th>
                   <th class="py-3 px-3 text-right">Acciones</th>
                 </tr>
@@ -633,7 +631,7 @@
       <!-- TAB 5: CALENDARIO                                     -->
       <!-- ===================================================== -->
       <section id="tab-calendar" class="hidden space-y-6 tab-animate">
-        <div class="glass-card p-5 sm:p-6 rounded-2xl space-y-4">
+        <div class="glass-card p-4 sm:p-6 rounded-2xl space-y-4">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 id="calendarMonthTitle" class="text-xl font-extrabold text-white">Noviembre 2026</h3>
@@ -644,21 +642,23 @@
             </div>
             <div class="flex items-center space-x-2">
               <button type="button" data-action="change-calendar-month" data-offset="-1" aria-label="Mes anterior" class="p-2.5 rounded-xl bg-slate-800 text-slate-200 hover:text-white border border-brand-border"><i data-lucide="chevron-left" class="w-5 h-5"></i></button>
-              <button type="button" data-action="reset-calendar-today" class="px-3.5 py-2.5 rounded-xl bg-slate-800 text-xs font-semibold text-brand-accent hover:bg-slate-700 border border-brand-border">Hoy</button>
+              <button type="button" data-action="reset-calendar-today" class="inline-flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-slate-800 text-xs font-semibold text-brand-accent hover:bg-slate-700 border border-brand-border">
+                <i data-lucide="calendar-days" class="w-3.5 h-3.5"></i>
+                <span>Hoy</span>
+              </button>
               <button type="button" data-action="change-calendar-month" data-offset="1" aria-label="Mes siguiente" class="p-2.5 rounded-xl bg-slate-800 text-slate-200 hover:text-white border border-brand-border"><i data-lucide="chevron-right" class="w-5 h-5"></i></button>
             </div>
           </div>
 
-          <div class="overflow-x-auto pb-1">
-            <div class="min-w-[620px] space-y-2">
-              <div class="grid grid-cols-7 gap-1.5 text-center font-semibold text-xs text-slate-300 border-b border-brand-border pb-2">
+          <div class="w-full pb-1">
+            <div class="w-full space-y-2">
+              <div class="grid grid-cols-7 gap-1 sm:gap-1.5 text-center font-semibold text-[10px] sm:text-xs text-slate-300 border-b border-brand-border pb-2">
                 <div>Dom</div><div>Lun</div><div>Mar</div><div>Mié</div><div>Jue</div><div>Vie</div><div>Sáb</div>
               </div>
-              <div id="calendarGrid" class="grid grid-cols-7 gap-1.5 sm:gap-2 min-h-[420px]"></div>
+              <div id="calendarGrid" class="grid grid-cols-7 gap-1 sm:gap-2 min-h-[300px] sm:min-h-[420px]"></div>
             </div>
           </div>
 
-          <!-- Lista compacta del mes (muy práctica en celular) -->
           <div class="pt-4 border-t border-white/10 space-y-2.5">
             <h4 class="text-xs font-bold uppercase tracking-wider text-slate-300">Resumen de fincas programadas en este mes</h4>
             <div id="calendarMonthSummaryList" class="grid grid-cols-1 md:grid-cols-2 gap-2.5"></div>
@@ -672,14 +672,15 @@
       <section id="tab-billing" class="hidden space-y-6 tab-animate">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h3 class="text-lg font-bold text-white">Gestión de Cobros y Cuentas por Cobrar</h3>
-            <p class="text-xs text-slate-300">Resumen real cobrado por método de pago, abonos parciales, exportación CSV y recordatorios WhatsApp</p>
+            <h3 class="text-lg font-bold text-white">Gestión de Cobros, Libro de Abonos y Cartera</h3>
+            <p class="text-xs text-slate-300">Recaudo real desglosado por cada abono vigente (sin sobrescribir métodos previos), anticipos, saldos a favor y CSV</p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <select id="filterBillingStatusSelect" data-change="filter-billing" class="px-3 py-2.5 rounded-xl bg-slate-950/80 border border-brand-border text-white text-xs font-semibold">
-              <option value="ALL">Todos los cobros</option>
-              <option value="OPEN">Con saldo pendiente</option>
-              <option value="PAID">Solo Pagados</option>
+              <option value="ALL">Todos los registros</option>
+              <option value="OPEN">Con saldo exigible</option>
+              <option value="PAID">Pagados / Liquidados</option>
+              <option value="CREDIT">Con anticipo / saldo a favor</option>
             </select>
             <button type="button" data-action="export-billing-csv" class="px-4 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-brand-accent border border-brand-accent/30 text-xs font-bold flex items-center justify-center space-x-2">
               <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
@@ -688,18 +689,18 @@
           </div>
         </div>
 
-        <div id="billingSummaryCards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"></div>
+        <div id="billingSummaryCards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 tabular-nums"></div>
 
         <div class="glass-card p-4 sm:p-6 rounded-2xl">
           <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse text-xs md:text-sm min-w-[760px]">
+            <table class="responsive-table w-full text-left border-collapse text-xs md:text-sm md:min-w-[780px] tabular-nums">
               <thead>
                 <tr class="border-b border-brand-border text-slate-300 font-semibold uppercase text-[11px] tracking-wider">
                   <th class="py-3 px-3">Fecha / Orden</th>
                   <th class="py-3 px-3">Productor</th>
                   <th class="py-3 px-3">Finca</th>
-                  <th class="py-3 px-3">Monto / Saldo</th>
-                  <th class="py-3 px-3">Método / Comprobante</th>
+                  <th class="py-3 px-3">Total / Saldo</th>
+                  <th class="py-3 px-3">Abonos / Métodos</th>
                   <th class="py-3 px-3">Estado</th>
                   <th class="py-3 px-3 text-right">Acciones</th>
                 </tr>
@@ -716,15 +717,14 @@
       <section id="tab-settings" class="hidden space-y-6 tab-animate">
         <div class="glass-card p-5 sm:p-6 rounded-2xl space-y-6">
           <div>
-            <h3 class="text-lg font-bold text-white mb-1">Configuración de Secretaría, Temporadas, WhatsApp y Respaldo</h3>
+            <h3 class="text-lg font-bold text-white mb-1">Configuración Empresarial, Tarifas, Temporadas y Respaldo</h3>
             <p class="text-xs text-slate-300">Al modificar los meses de temporada lluviosa o los días de frecuencia, todas las fechas base se recalculan automáticamente.</p>
           </div>
 
           <form id="settingsForm" data-submit="settings-form" class="space-y-6" novalidate>
-            <!-- Datos de la asociación -->
             <div class="p-4 rounded-2xl bg-slate-950/55 border border-brand-blue/30 space-y-4">
               <h4 class="text-sm font-bold text-brand-blue flex items-center">
-                <i data-lucide="building-2" class="w-4 h-4 mr-2"></i> Datos de la Asociación (Encabezado de PDFs)
+                <i data-lucide="building-2" class="w-4 h-4 mr-2"></i> Datos de la Asociación y Tarifas Base (PDFs y Órdenes)
               </h4>
               <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
@@ -733,45 +733,52 @@
                 </div>
                 <div>
                   <label for="settingAssocPhone" class="block text-xs font-semibold text-slate-300 mb-1">Teléfono / WhatsApp Oficina</label>
-                  <input type="text" id="settingAssocPhone" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" placeholder="099-123-4567">
+                  <input type="text" id="settingAssocPhone" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" placeholder="099-000-0000">
                 </div>
                 <div>
                   <label for="settingAssocRuc" class="block text-xs font-semibold text-slate-300 mb-1">RUC / Identificación</label>
-                  <input type="text" id="settingAssocRuc" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" placeholder="0791234567001">
+                  <input type="text" id="settingAssocRuc" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" placeholder="0790000000001">
                 </div>
               </div>
 
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+              <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-end">
                 <div>
-                  <label class="block text-xs font-semibold text-slate-300 mb-1">Logo Opcional para PDF (PNG/JPG)</label>
-                  <div class="flex flex-wrap items-center gap-2.5">
-                    <label class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-brand-accent border border-brand-accent/30 text-xs font-semibold cursor-pointer flex items-center space-x-2">
+                  <label class="block text-xs font-semibold text-slate-300 mb-1">Logo Opcional para PDF</label>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <label class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-brand-accent border border-brand-accent/30 text-xs font-semibold cursor-pointer flex items-center space-x-1.5">
                       <i data-lucide="image-plus" class="w-4 h-4"></i>
-                      <span>Subir Logo</span>
+                      <span>Subir</span>
                       <input type="file" accept="image/*" data-change="assoc-logo-upload" class="hidden">
                     </label>
-                    <button type="button" data-action="clear-assoc-logo" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs">Quitar</button>
+                    <button type="button" data-action="clear-assoc-logo" class="inline-flex items-center space-x-1.5 px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-rose-300 text-xs">
+                      <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                      <span>Quitar</span>
+                    </button>
                     <img id="settingLogoPreview" src="" alt="Logo de la asociación" class="hidden h-10 w-auto rounded-lg border border-white/15 bg-white p-1">
                   </div>
                 </div>
                 <div>
-                  <label for="settingClientRatePerHa" class="block text-xs font-semibold text-slate-300 mb-1">Tarifa Sugerida Cliente ($/ha)</label>
-                  <input type="number" step="0.01" min="0" id="settingClientRatePerHa" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" value="15.00">
+                  <label for="settingClientRatePerHa" class="block text-xs font-semibold text-slate-300 mb-1">Tarifa Cliente ($/ha)</label>
+                  <input type="number" step="0.01" min="0" id="settingClientRatePerHa" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm tabular-nums" value="15.00">
                 </div>
                 <div>
-                  <label for="settingPilotRatePerHa" class="block text-xs font-semibold text-slate-300 mb-1">Pago por Hectárea al Piloto ($/ha)</label>
-                  <input type="number" step="0.01" min="0" id="settingPilotRatePerHa" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" value="4.50">
+                  <label for="settingPilotRatePerHa" class="block text-xs font-semibold text-slate-300 mb-1">Tarifa Piloto ($/ha)</label>
+                  <input type="number" step="0.01" min="0" id="settingPilotRatePerHa" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm tabular-nums" value="4.50">
+                </div>
+                <div>
+                  <label for="settingDefaultIvaPct" class="block text-xs font-semibold text-slate-300 mb-1">IVA Predeterminado (%)</label>
+                  <input type="number" step="0.01" min="0" max="100" id="settingDefaultIvaPct" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm tabular-nums" value="0">
                 </div>
               </div>
 
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                 <div>
                   <label for="settingPilotsList" class="block text-xs font-semibold text-slate-300 mb-1">Pilotos Registrados (separados por coma) *</label>
-                  <input type="text" id="settingPilotsList" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" placeholder="Juan Diego Cobos Anguisaca">
+                  <input type="text" id="settingPilotsList" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" placeholder="Ing. Diego Vera, Carlos Ruiz">
                 </div>
                 <div>
                   <label for="settingDronesList" class="block text-xs font-semibold text-slate-300 mb-1">Drones Registrados (separados por coma) *</label>
-                  <input type="text" id="settingDronesList" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" placeholder="Alfa_3">
+                  <input type="text" id="settingDronesList" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-brand-border text-white text-sm" placeholder="DJI Agras T40 #1, DJI Agras T30 #1">
                 </div>
               </div>
             </div>
@@ -810,7 +817,7 @@
                   <h4 class="text-sm font-bold text-white flex items-center">
                     <i data-lucide="wallpaper" class="w-4 h-4 mr-2 text-brand-blue"></i> Fondo Fijo (<code class="text-brand-accent ml-1">fondo.jpg</code>) y Capa Oscura
                   </h4>
-                  <p class="text-[11px] text-slate-300 mt-0.5">La app usa el archivo local optimizado <code>fondo.jpg</code> sin imágenes pesadas en base64.</p>
+                  <p class="text-[11px] text-slate-300 mt-0.5">El logo PDF y el fondo se gestionan de forma separada para mantener rápida la memoria local.</p>
                 </div>
                 <div class="flex items-center space-x-3 text-xs text-slate-200">
                   <label for="settingOverlayOpacity">Oscurecimiento:</label>
@@ -872,7 +879,7 @@
           <div class="pt-6 border-t border-brand-border space-y-4">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h4 class="text-sm font-bold text-white">Respaldo y Restauración (JSON)</h4>
+                <h4 class="text-sm font-bold text-white">Respaldo y Restauración (JSON — Compatible V4 y V5)</h4>
                 <p id="settingsBackupMetaInfo" class="text-xs text-slate-300 mt-0.5">Último respaldo JSON: aún no realizado.</p>
               </div>
             </div>
@@ -913,8 +920,8 @@
   <!-- ===================================================== -->
   <!-- MODAL: PRODUCTOR Y FINCA CRUD                         -->
   <!-- ===================================================== -->
-  <div id="producerModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-4">
-    <div class="glass-card neon-glow-green w-full max-w-2xl max-h-[92dvh] overflow-y-auto rounded-2xl p-5 sm:p-6 space-y-4 relative">
+  <div id="producerModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="glass-card neon-glow-green modal-safe-sheet w-full max-w-2xl max-h-[92dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 space-y-4 relative">
       <button type="button" data-action="close-modal" data-modal-id="producerModal" aria-label="Cerrar" class="absolute top-4 right-4 text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800">
         <i data-lucide="x" class="w-5 h-5"></i>
       </button>
@@ -965,7 +972,7 @@
             </div>
             <div>
               <label for="farmHectares" class="block text-xs font-semibold text-slate-300 mb-1">Hectáreas (ha) *</label>
-              <input type="number" step="0.01" min="0.01" id="farmHectares" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="18.50">
+              <input type="number" step="0.01" min="0.01" id="farmHectares" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm tabular-nums" placeholder="18.50">
             </div>
           </div>
 
@@ -990,10 +997,10 @@
   </div>
 
   <!-- ===================================================== -->
-  <!-- MODAL: FUMIGACIÓN INDIVIDUAL CRUD                     -->
+  <!-- MODAL: FUMIGACIÓN INDIVIDUAL CRUD (CON DESCUENTO/IVA) -->
   <!-- ===================================================== -->
-  <div id="sprayModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-4">
-    <div class="glass-card neon-glow-green w-full max-w-2xl max-h-[92dvh] overflow-y-auto rounded-2xl p-5 sm:p-6 space-y-4 relative">
+  <div id="sprayModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="glass-card neon-glow-green modal-safe-sheet w-full max-w-2xl lg:max-w-3xl max-h-[92dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 space-y-4 relative">
       <button type="button" data-action="close-modal" data-modal-id="sprayModal" aria-label="Cerrar" class="absolute top-4 right-4 text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800">
         <i data-lucide="x" class="w-5 h-5"></i>
       </button>
@@ -1013,7 +1020,7 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
             <label for="sprayOrderNumber" class="block text-xs font-semibold text-slate-300 mb-1">N.º Orden</label>
             <input type="text" id="sprayOrderNumber" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-brand-blue font-mono text-xs" placeholder="ORD-2026-009">
@@ -1028,13 +1035,13 @@
           </div>
           <div>
             <label for="sprayHectares" class="block text-xs font-semibold text-slate-300 mb-1">Hectáreas *</label>
-            <input type="number" step="0.01" min="0.01" id="sprayHectares" data-input="spray-hectares" required class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm">
+            <input type="number" step="0.0001" min="0.0001" id="sprayHectares" data-input="spray-hectares" required class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm tabular-nums">
           </div>
           <div>
             <label for="sprayDrone" class="block text-xs font-semibold text-slate-300 mb-1">Dron *</label>
             <select id="sprayDrone" class="w-full px-2.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-xs"></select>
           </div>
-          <div class="col-span-2 sm:col-span-1">
+          <div class="sm:col-span-2 lg:col-span-1">
             <label for="sprayPilot" class="block text-xs font-semibold text-slate-300 mb-1">Piloto *</label>
             <select id="sprayPilot" required class="w-full px-2.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-xs"></select>
           </div>
@@ -1057,28 +1064,54 @@
           <textarea id="sprayNotes" rows="2" class="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-xs" placeholder="Ej. Aplicación completa en lote norte, sin novedades..."></textarea>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div>
-            <label for="sprayAmount" class="block text-xs font-semibold text-slate-300 mb-1">Monto Total Cliente ($ USD) *</label>
-            <input type="number" step="0.01" min="0" id="sprayAmount" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="250.00">
+        <!-- Desglose comercial exacto (Tarifa/ha, Descuento %, IVA %, Total y Piloto) -->
+        <div class="p-3.5 rounded-xl bg-slate-950/70 border border-brand-blue/30 space-y-3 tabular-nums">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs font-bold text-brand-blue uppercase tracking-wider">Liquidación Exacta del Servicio</span>
+            <span id="sprayPricingBreakdown" class="text-[11px] font-mono text-slate-300">Subtotal: $0.00 • Total: $0.00</span>
           </div>
-          <div>
-            <label for="sprayPilotPay" class="block text-xs font-semibold text-slate-300 mb-1">Depósito al Piloto ($ USD)</label>
-            <input type="number" step="0.01" min="0" id="sprayPilotPay" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-brand-blue text-sm" placeholder="0.00">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label for="sprayUnitRateHa" class="block text-[11px] font-semibold text-slate-300 mb-1">Tarifa ($/ha) *</label>
+              <input type="number" step="0.01" min="0" id="sprayUnitRateHa" data-input="spray-pricing" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="15.00">
+            </div>
+            <div>
+              <label for="sprayDiscountPct" class="block text-[11px] font-semibold text-slate-300 mb-1">Descuento (%)</label>
+              <input type="number" step="0.01" min="0" max="100" id="sprayDiscountPct" data-input="spray-pricing" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" value="0">
+            </div>
+            <div>
+              <label for="sprayIvaPct" class="block text-[11px] font-semibold text-slate-300 mb-1">IVA (%)</label>
+              <input type="number" step="0.01" min="0" max="100" id="sprayIvaPct" data-input="spray-pricing" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" value="0">
+            </div>
+            <div>
+              <label for="sprayAmount" class="block text-[11px] font-semibold text-brand-accent mb-1">Total Cliente ($) *</label>
+              <input type="number" step="0.01" min="0" id="sprayAmount" required class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-brand-accent/45 text-white font-bold text-sm" placeholder="250.00">
+            </div>
           </div>
-          <div>
-            <label for="sprayPilotPaid" class="block text-xs font-semibold text-slate-300 mb-1">Estado Pago al Piloto</label>
-            <select id="sprayPilotPaid" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm">
-              <option value="false">Pendiente de depositar</option>
-              <option value="true">Ya depositado</option>
-            </select>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-white/10">
+            <div>
+              <label for="sprayPilotPay" class="block text-xs font-semibold text-slate-300 mb-1">Pago al Piloto ($ USD — se devenga al realizarse)</label>
+              <input type="number" step="0.01" min="0" id="sprayPilotPay" class="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-brand-border text-brand-blue text-sm" placeholder="0.00">
+            </div>
+            <div>
+              <label for="sprayPilotPaid" class="block text-xs font-semibold text-slate-300 mb-1">Estado Depósito al Piloto</label>
+              <select id="sprayPilotPaid" class="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-sm">
+                <option value="false">Pendiente de depositar</option>
+                <option value="true">Ya depositado (solo Realizadas)</option>
+              </select>
+            </div>
           </div>
         </div>
 
-        <div class="p-3.5 rounded-xl bg-slate-900/80 border border-brand-border space-y-3">
+        <!-- Aviso si la orden ya tiene abonos múltiples registrados -->
+        <div id="sprayExistingPaymentsNotice" class="hidden p-3.5 rounded-xl bg-brand-blue/10 border border-brand-blue/35 text-xs text-slate-200"></div>
+
+        <!-- Bloque de pago inicial (se usa al crear o si la orden aún no tiene movimientos en el libro de abonos) -->
+        <div id="sprayInitialPaymentSection" class="p-3.5 rounded-xl bg-slate-900/80 border border-brand-border space-y-3">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label for="sprayPayMethod" class="block text-xs font-semibold text-slate-300 mb-1">Método de Pago *</label>
+              <label for="sprayPayMethod" class="block text-xs font-semibold text-slate-300 mb-1">Método de Pago Inicial *</label>
               <select id="sprayPayMethod" data-change="spray-pay-method" required class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-brand-border text-white text-sm">
                 <option value="Transferencia">Transferencia Bancaria</option>
                 <option value="Cheque">Cheque</option>
@@ -1086,18 +1119,18 @@
               </select>
             </div>
             <div>
-              <label for="sprayPayStatus" class="block text-xs font-semibold text-slate-300 mb-1">Estado del Pago *</label>
+              <label for="sprayPayStatus" class="block text-xs font-semibold text-slate-300 mb-1">Estado del Pago Inicial *</label>
               <select id="sprayPayStatus" data-change="spray-pay-status" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-brand-border text-white text-sm">
                 <option value="Pagado">Pagado Completo</option>
-                <option value="Parcial">Abono Parcial</option>
+                <option value="Parcial">Abono Parcial / Anticipo</option>
                 <option value="Pendiente">Pendiente de Pago</option>
               </select>
             </div>
           </div>
 
           <div id="partialPaidGroup" class="hidden">
-            <label for="sprayAmountPaid" class="block text-xs font-semibold text-amber-300 mb-1">Monto Abonado ($ USD) — debe ser mayor a $0 y menor al total</label>
-            <input type="number" step="0.01" min="0" id="sprayAmountPaid" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-amber-500/40 text-white text-sm" placeholder="0.00">
+            <label for="sprayAmountPaid" class="block text-xs font-semibold text-amber-300 mb-1">Monto Abonado Inicial ($ USD)</label>
+            <input type="number" step="0.01" min="0" id="sprayAmountPaid" class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-amber-500/40 text-white text-sm tabular-nums" placeholder="0.00">
           </div>
 
           <div id="paymentRefContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1121,48 +1154,61 @@
   </div>
 
   <!-- ===================================================== -->
-  <!-- MODAL: REGISTRAR ABONO / COBRO RÁPIDO                 -->
+  <!-- MODAL: LIBRO AUDITABLE DE ABONOS Y NUEVO COBRO        -->
   <!-- ===================================================== -->
-  <div id="paymentModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-4">
-    <div class="glass-card neon-glow-blue w-full max-w-md rounded-2xl p-5 sm:p-6 space-y-4 relative">
+  <div id="paymentModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="glass-card neon-glow-blue modal-safe-sheet w-full max-w-lg max-h-[92dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 space-y-4 relative tabular-nums">
       <button type="button" data-action="close-modal" data-modal-id="paymentModal" aria-label="Cerrar" class="absolute top-4 right-4 text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800">
         <i data-lucide="x" class="w-5 h-5"></i>
       </button>
 
       <div>
         <h3 class="text-lg font-bold text-white flex items-center pr-8">
-          <i data-lucide="wallet" class="w-5 h-5 mr-2 text-brand-blue"></i> Registrar Abono / Pago
+          <i data-lucide="wallet" class="w-5 h-5 mr-2 text-brand-blue"></i> Libro de Abonos y Cobros
         </h3>
         <p id="paymentModalSubtitle" class="text-xs text-slate-300 mt-0.5"></p>
       </div>
 
-      <form id="paymentForm" data-submit="payment-form" class="space-y-3.5" novalidate>
-        <input type="hidden" id="paymentSprayId">
-
-        <div class="grid grid-cols-3 gap-2 text-center p-3 rounded-xl bg-slate-950/75 border border-brand-border text-xs">
-          <div>
-            <div class="text-[10px] uppercase text-slate-400">Total</div>
-            <div id="paymentInfoTotal" class="font-bold text-white">$0.00</div>
-          </div>
-          <div>
-            <div class="text-[10px] uppercase text-slate-400">Abonado</div>
-            <div id="paymentInfoPaid" class="font-bold text-brand-accent">$0.00</div>
-          </div>
-          <div>
-            <div class="text-[10px] uppercase text-slate-400">Saldo</div>
-            <div id="paymentInfoBalance" class="font-bold text-amber-400">$0.00</div>
-          </div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-center p-3 rounded-xl bg-slate-950/75 border border-brand-border text-xs">
+        <div class="flex sm:block items-center justify-between px-2 py-1 sm:p-0 border-b sm:border-b-0 border-white/5">
+          <div class="text-[10px] uppercase text-slate-400">Total Orden</div>
+          <div id="paymentInfoTotal" class="font-bold text-white">$0.00</div>
         </div>
+        <div class="flex sm:block items-center justify-between px-2 py-1 sm:p-0 border-b sm:border-b-0 border-white/5">
+          <div class="text-[10px] uppercase text-slate-400">Abonado Vigente</div>
+          <div id="paymentInfoPaid" class="font-bold text-brand-accent">$0.00</div>
+        </div>
+        <div class="flex sm:block items-center justify-between px-2 py-1 sm:p-0">
+          <div id="paymentInfoBalanceLabel" class="text-[10px] uppercase text-slate-400">Saldo</div>
+          <div id="paymentInfoBalance" class="font-bold text-amber-400">$0.00</div>
+        </div>
+      </div>
 
-        <div>
-          <label for="paymentAddAmount" class="block text-xs font-semibold text-slate-300 mb-1">Monto que ingresa hoy ($ USD) *</label>
-          <input type="number" step="0.01" min="0.01" id="paymentAddAmount" required class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-brand-accent/45 text-white text-sm font-bold">
+      <!-- Historial auditable de movimientos de esta orden -->
+      <div id="paymentHistorySection" class="p-3 rounded-xl bg-slate-950/70 border border-white/10 space-y-2">
+        <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Historial de Abonos Registrados</div>
+        <div id="paymentHistoryList" class="space-y-1.5 max-h-40 overflow-y-auto pr-1 text-xs"></div>
+      </div>
+
+      <form id="paymentForm" data-submit="payment-form" class="space-y-3.5 pt-2 border-t border-white/10" novalidate>
+        <input type="hidden" id="paymentSprayId">
+        <div class="text-xs font-bold text-brand-accent uppercase tracking-wider">Registrar Nuevo Abono / Pago</div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label for="paymentAddAmount" class="block text-xs font-semibold text-slate-300 mb-1">Monto que ingresa ($ USD) *</label>
+            <input type="number" step="0.01" min="0.01" id="paymentAddAmount" required class="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-brand-accent/45 text-white text-sm font-bold">
+          </div>
+          <div>
+            <label for="paymentDate" class="block text-xs font-semibold text-slate-300 mb-1">Fecha del Abono *</label>
+            <input type="date" id="paymentDate" required class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-sm">
+          </div>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label for="paymentMethod" class="block text-xs font-semibold text-slate-300 mb-1">Método de Pago</label>
-            <select id="paymentMethod" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm">
+            <select id="paymentMethod" data-change="payment-modal-method" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-sm">
               <option value="Transferencia">Transferencia</option>
               <option value="Cheque">Cheque</option>
               <option value="Efectivo">Efectivo</option>
@@ -1170,18 +1216,24 @@
           </div>
           <div>
             <label for="paymentRef" class="block text-xs font-semibold text-slate-300 mb-1">Comprobante / Ref</label>
-            <input type="text" id="paymentRef" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="Opcional">
+            <input type="text" id="paymentRef" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="Ej. TR-10452">
           </div>
         </div>
 
-        <div>
-          <label for="paymentBank" class="block text-xs font-semibold text-slate-300 mb-1">Banco (si aplica)</label>
-          <input type="text" id="paymentBank" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="Ej. Banco Pichincha / Machala">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div id="paymentBankGroupModal">
+            <label for="paymentBank" class="block text-xs font-semibold text-slate-300 mb-1">Banco Emisor</label>
+            <input type="text" id="paymentBank" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="Ej. Banco Pichincha / Machala">
+          </div>
+          <div>
+            <label for="paymentNote" class="block text-xs font-semibold text-slate-300 mb-1">Nota (opcional)</label>
+            <input type="text" id="paymentNote" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-sm" placeholder="Ej. 2do abono de cosecha">
+          </div>
         </div>
 
         <div class="flex justify-end space-x-2 pt-3 border-t border-brand-border">
-          <button type="button" data-action="close-modal" data-modal-id="paymentModal" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold">Cancelar</button>
-          <button type="submit" class="neon-btn px-5 py-2 rounded-xl font-bold text-xs">Registrar Abono</button>
+          <button type="button" data-action="close-modal" data-modal-id="paymentModal" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold">Cerrar</button>
+          <button type="submit" class="neon-btn px-5 py-2 rounded-xl font-bold text-xs">Guardar Abono</button>
         </div>
       </form>
     </div>
@@ -1190,8 +1242,8 @@
   <!-- ===================================================== -->
   <!-- MODAL: REPROGRAMAR FUMIGACIÓN                         -->
   <!-- ===================================================== -->
-  <div id="rescheduleModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-4">
-    <div class="glass-card neon-glow-amber w-full max-w-lg max-h-[92dvh] overflow-y-auto rounded-2xl p-5 sm:p-6 space-y-4 relative">
+  <div id="rescheduleModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="glass-card neon-glow-amber modal-safe-sheet w-full max-w-lg max-h-[92dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 space-y-4 relative">
       <button type="button" data-action="close-modal" data-modal-id="rescheduleModal" aria-label="Cerrar" class="absolute top-4 right-4 text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800">
         <i data-lucide="x" class="w-5 h-5"></i>
       </button>
@@ -1229,8 +1281,9 @@
         </div>
 
         <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-brand-border">
-          <button type="button" id="clearRescheduleBtn" data-action="clear-reschedule" class="hidden px-3 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/35 text-xs font-semibold">
-            Volver a fecha base
+          <button type="button" id="clearRescheduleBtn" data-action="clear-reschedule" class="hidden px-3 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/35 text-xs font-semibold flex items-center space-x-1.5">
+            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+            <span>Volver a fecha base</span>
           </button>
           <div class="flex items-center space-x-2 ml-auto">
             <button type="button" data-action="close-modal" data-modal-id="rescheduleModal" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold">Cerrar</button>
@@ -1244,8 +1297,8 @@
   <!-- ===================================================== -->
   <!-- MODAL: PDF ORDEN / CERTIFICADO DE FUMIGACIÓN (BLANCO) -->
   <!-- ===================================================== -->
-  <div id="printableSprayPdfModal" class="printable-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-3 sm:p-4">
-    <div class="printable-sheet glass-card w-full max-w-4xl max-h-[92dvh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
+  <div id="printableSprayPdfModal" class="printable-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="printable-sheet modal-safe-sheet glass-card w-full max-w-4xl max-h-[92dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 space-y-4">
       <div class="no-print flex flex-wrap justify-between items-center gap-3 pb-3 border-b border-white/15">
         <h3 class="font-bold text-base sm:text-lg text-white">Vista Previa PDF — Orden de Fumigación</h3>
         <div class="flex space-x-2">
@@ -1264,8 +1317,8 @@
   <!-- ===================================================== -->
   <!-- MODAL: PDF ESTADO DE CUENTA DEL PRODUCTOR (BLANCO)    -->
   <!-- ===================================================== -->
-  <div id="printableStatementModal" class="printable-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-3 sm:p-4">
-    <div class="printable-sheet glass-card w-full max-w-4xl max-h-[92dvh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
+  <div id="printableStatementModal" class="printable-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="printable-sheet modal-safe-sheet glass-card w-full max-w-4xl max-h-[92dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 space-y-4">
       <div class="no-print flex flex-wrap justify-between items-center gap-3 pb-3 border-b border-white/15">
         <h3 class="font-bold text-base sm:text-lg text-white">Vista Previa PDF — Historial y Estado de Cuenta</h3>
         <div class="flex space-x-2">
@@ -1284,10 +1337,10 @@
   <!-- ===================================================== -->
   <!-- MODAL: CONFIRMACIÓN PERSONALIZADA                     -->
   <!-- ===================================================== -->
-  <div id="confirmModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[90] hidden flex items-center justify-center p-4">
-    <div class="glass-card neon-glow-amber w-full max-w-md rounded-2xl p-6 space-y-4">
+  <div id="confirmModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[90] hidden flex items-end sm:items-center justify-center p-3 sm:p-4">
+    <div class="glass-card neon-glow-amber modal-safe-sheet w-full max-w-md rounded-2xl p-5 sm:p-6 space-y-4">
       <div class="flex items-center space-x-3 text-amber-400">
-        <i data-lucide="alert-triangle" class="w-6 h-6 shrink-0"></i>
+        <i data-lucide="triangle-alert" class="w-6 h-6 shrink-0"></i>
         <h3 id="confirmModalTitle" class="text-base font-bold text-white">Confirmar acción</h3>
       </div>
       <p id="confirmModalMessage" class="text-sm text-slate-200 leading-relaxed"></p>

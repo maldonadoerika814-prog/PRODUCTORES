@@ -1,6 +1,6 @@
 /* ==========================================================================
    AgroDrone - Punto de Entrada Principal (js/main.js)
-   Inicializa el estado, enlaza eventos delegados y arranca el Panel Principal.
+   Inicializa estado V5, sincronización entre pestañas y eventos delegados.
    ========================================================================== */
 
 "use strict";
@@ -15,6 +15,7 @@ function initApp() {
   setupDelegatedUiEvents();
   setupModalAccessibility();
   setupAutoBackupOnClose();
+  setupCrossTabSync();
   switchTab("dashboard");
   safeRefreshIcons();
 }

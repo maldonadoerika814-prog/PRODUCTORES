@@ -1,7 +1,7 @@
 /* ==========================================================================
    AgroDrone - Importador de Vuelos DJI SmartFarm (js/dji-import.js)
-   Procesamiento de Excel (hoja "flight record") con SheetJS, agrupación por
-   Fecha + Location, división por Plot ID, memorias y registro sin JS inline.
+   Conversión exacta mu -> hectáreas (4 decimales internos sin inflar ceros),
+   bloqueo de filas con área 0, suma exacta con BigInt y asiento contable V5.
    ========================================================================== */
 
 "use strict";
@@ -133,27 +133,27 @@ function parseDjiFlightTimestamp(rawVal) {
 
 function parseDjiNumericMu(rawVal) {
   if (typeof rawVal === "number") {
-    return Number.isFinite(rawVal) && rawVal >= 0 ? rawVal : 0;
+    return Number.isFinite(rawVal) && rawVal >= 0 ? roundDecimalExact(rawVal, 4) : 0;
   }
   const cleaned = String(rawVal === null || rawVal === undefined ? "" : rawVal)
     .trim()
     .replace(",", ".")
     .replace(/[^0-9.\-]/g, "");
   const num = parseFloat(cleaned);
-  return Number.isFinite(num) && num >= 0 ? num : 0;
+  return Number.isFinite(num) && num >= 0 ? roundDecimalExact(num, 4) : 0;
 }
 
 function parseDjiOptionalNumber(rawVal) {
   if (rawVal === null || rawVal === undefined) return null;
   if (typeof rawVal === "number") {
-    return Number.isFinite(rawVal) && rawVal >= 0 ? rawVal : null;
+    return Number.isFinite(rawVal) && rawVal >= 0 ? roundDecimalExact(rawVal, 4) : null;
   }
   const trimmed = String(rawVal).trim();
   if (!trimmed) return null;
   const cleaned = trimmed.replace(",", ".").replace(/[^0-9.\-]/g, "");
   if (!cleaned) return null;
   const num = parseFloat(cleaned);
-  return Number.isFinite(num) && num >= 0 ? num : null;
+  return Number.isFinite(num) && num >= 0 ? roundDecimalExact(num, 4) : null;
 }
 
 function makeDjiFlightKey(canonicalTime, serialNumber) {
@@ -178,8 +178,12 @@ function pickMostFrequentString(values) {
 }
 
 function buildDjiReviewRow(flights, opts) {
-  let rawMuSum = 0;
-  let productAmountSum = 0;
+  const scaleBigInt = roundDecimalExact._scaleBigInt;
+  const divHalfUp = roundDecimalExact._divHalfAwayFromZero;
+  const formatBigInt = roundDecimalExact._formatBigInt;
+
+  let muScaledSum = 0n;
+  let productScaledSum = 0n;
   let productAmountCount = 0;
   let minStartMs = Infinity;
   let startTimeShort = "";
@@ -197,9 +201,9 @@ function buildDjiReviewRow(flights, opts) {
   let noPlotFlightCount = 0;
 
   flights.forEach(fl => {
-    rawMuSum += fl.mu;
+    muScaledSum += scaleBigInt(fl.mu, 4);
     if (fl.totalAmount !== null && fl.totalAmount !== undefined) {
-      productAmountSum += fl.totalAmount;
+      productScaledSum += scaleBigInt(fl.totalAmount, 2);
       productAmountCount++;
     }
     if (fl.timestampMs < minStartMs) {
@@ -239,7 +243,12 @@ function buildDjiReviewRow(flights, opts) {
     }
   }
 
-  const totalProductAmount = productAmountCount > 0 ? roundMoney(productAmountSum) : 0;
+  // Conversión exacta: 1 ha = 15 mu -> haScaled(4 dec) = divHalfUp(muScaled(4 dec), 15n)
+  const totalMu = formatBigInt(divHalfUp(muScaledSum, 100n), 2);
+  const haScaled4 = divHalfUp(muScaledSum, 15n);
+  const hectares = formatBigInt(haScaled4, 4);
+  const isInvalidZeroArea = haScaled4 <= 0n;
+  const totalProductAmount = productAmountCount > 0 ? formatBigInt(productScaledSum, 2) : 0;
 
   return {
     rowId: opts.rowId,
@@ -260,8 +269,9 @@ function buildDjiReviewRow(flights, opts) {
     hasProductAmount: productAmountCount > 0 && totalProductAmount > 0,
     totalProductAmount,
     flightCount: flights.length,
-    totalMu: Math.round((rawMuSum + Number.EPSILON) * 100) / 100,
-    hectares: roundHectares(rawMuSum / 15),
+    totalMu,
+    hectares,
+    isInvalidZeroArea,
     minStartMs: Number.isFinite(minStartMs) ? minStartMs : 0,
     startTimeShort,
     startTimeFull,
@@ -269,9 +279,9 @@ function buildDjiReviewRow(flights, opts) {
     endTimeFull,
     flightKeys,
     serialNumbers: Array.from(serialNumbersSet),
-    selectedFarmId: rememberedFarmId,
-    fromMemory: Boolean(rememberedFarmId),
-    included: Boolean(rememberedFarmId),
+    selectedFarmId: isInvalidZeroArea ? "" : rememberedFarmId,
+    fromMemory: Boolean(!isInvalidZeroArea && rememberedFarmId),
+    included: Boolean(!isInvalidZeroArea && rememberedFarmId),
     registered: false
   };
 }
@@ -467,15 +477,20 @@ function parseDjiWorkbook(workbook, fileName = "Excel DJI") {
       a.plotId.localeCompare(b.plotId)
     );
 
-  const warning = !hasLocationColumn
-    ? 'Aviso: el archivo no contiene la columna "Location". Se agruparon los vuelos por fecha y Plot ID.'
-    : "";
+  const zeroAreaCount = rows.filter(r => r.isInvalidZeroArea).length;
+  const warnings = [];
+  if (!hasLocationColumn) {
+    warnings.push('El archivo no contiene la columna "Location"; se agruparon los vuelos por fecha y Plot ID.');
+  }
+  if (zeroAreaCount > 0) {
+    warnings.push(`${zeroAreaCount} fila(s) tienen área pulverizada igual a 0.00 mu y fueron bloqueadas automáticamente para evitar registros vacíos.`);
+  }
 
   return {
     ok: true,
     fileName,
     hasLocationColumn,
-    warning,
+    warning: warnings.join(" "),
     flightsRead,
     duplicatesSkipped,
     invalidRowsSkipped,
@@ -530,7 +545,7 @@ function handleDjiExcelUpload(event) {
           "info"
         );
       } else if (parsed.warning) {
-        showToast(`${parsed.warning} (${parsed.rows.length} fila(s)).`, "warning");
+        showToast(parsed.warning, "warning");
       } else {
         showToast(`Excel leído: ${parsed.flightsRead} vuelo(s) en ${parsed.rows.length} fila(s) agrupadas.`, "success");
       }
@@ -563,7 +578,7 @@ function hideDjiError() {
 function showDjiWarning(message) {
   const box = document.getElementById("djiWarningBox");
   if (!box) return;
-  box.innerHTML = `<div class="font-bold text-amber-300">Advertencia de columnas</div><div>${escapeHtml(message)}</div>`;
+  box.innerHTML = `<div class="font-bold text-amber-300">Aviso de validación DJI</div><div>${escapeHtml(message)}</div>`;
   box.classList.remove("hidden");
 }
 
@@ -677,10 +692,11 @@ function rejoinDjiGroup(groupId) {
 function renderDjiTab() {
   const defaultsEl = document.getElementById("djiDefaultsInfo");
   if (defaultsEl) {
-    const defPilot = (state.config.pilots && state.config.pilots[0]) || "Juan Diego Cobos Anguisaca";
-    const defDrone = (state.config.drones && state.config.drones[0]) || "Alfa_3";
+    const defPilot = (state.config.pilots && state.config.pilots[0]) || "Ing. Diego Vera";
+    const defDrone = (state.config.drones && state.config.drones[0]) || "DJI Agras T40 #1";
     const clientRate = Number.isFinite(state.config.clientRatePerHa) ? state.config.clientRatePerHa : 15;
-    defaultsEl.textContent = `Estado: Realizada • Pago: Pendiente • Piloto/Dron del Excel (respaldo: ${defPilot} / ${defDrone}) • Tarifa: ${formatMoney(clientRate)}/ha`;
+    const defIva = Number.isFinite(state.config.defaultIvaPct) ? state.config.defaultIvaPct : 0;
+    defaultsEl.textContent = `Estado: Realizada • Pago: Pendiente • Piloto/Dron del Excel (${defPilot} / ${defDrone}) • Tarifa: ${formatMoney(clientRate)}/ha${defIva > 0 ? ` + IVA ${defIva}%` : ""}`;
   }
 
   if (djiImportSession && djiImportSession.warning) {
@@ -705,11 +721,15 @@ function renderDjiSummary() {
   }
 
   summaryBox.classList.remove("hidden");
-  const pendingRows = djiImportSession.rows.filter(r => !r.registered);
+  const pendingRows = djiImportSession.rows.filter(r => !r.registered && !r.isInvalidZeroArea);
   const unassignedCount = pendingRows.filter(r => !r.selectedFarmId).length;
+  let sumScaled = 0n;
+  pendingRows.forEach(r => {
+    sumScaled += roundDecimalExact._scaleBigInt(r.hectares, 4);
+  });
   const totalHaDisplay = djiImportSession.registeredRowsCount > 0 && pendingRows.length === 0
     ? djiImportSession.registeredHectares
-    : roundHectares(pendingRows.reduce((acc, r) => acc + r.hectares, 0));
+    : roundDecimalExact._formatBigInt(sumScaled, 4);
 
   document.getElementById("djiSumFlightsRead").textContent = djiImportSession.flightsRead;
   document.getElementById("djiSumDuplicates").textContent = djiImportSession.duplicatesSkipped;
@@ -753,7 +773,6 @@ function renderDjiReviewTable() {
   if (regBtn) regBtn.disabled = isRegisteringDjiRows;
 
   const farms = getAllFarms();
-  const clientRate = Number.isFinite(state.config.clientRatePerHa) ? state.config.clientRatePerHa : 15;
   const farmOptionsHtml = farms.map(f => {
     const p = getProducerByFarmId(f.id);
     return `<option value="${escapeHtml(f.id)}">${escapeHtml(p ? p.name : "Productor")} — ${escapeHtml(f.name)} (${escapeHtml(f.crop)})</option>`;
@@ -765,20 +784,33 @@ function renderDjiReviewTable() {
   const seenSplitGroups = new Set();
 
   tbody.innerHTML = pendingRows.map(row => {
-    const estAmount = roundMoney(row.hectares * clientRate);
+    const previewFin = computeSprayFinancials({
+      pricingMode: "v5",
+      status: "Realizada",
+      hectares: row.hectares,
+      unitRateHa: state.config.clientRatePerHa,
+      discountPct: 0,
+      ivaPct: state.config.defaultIvaPct || 0,
+      payments: []
+    }, state.config);
+    const estAmount = previewFin.totalClient;
     const isUnassigned = !row.selectedFarmId;
 
     const badges = [];
-    if (row.isSplitChild) {
-      badges.push(`<span class="px-2 py-0.5 rounded bg-brand-blue/20 text-brand-blue border border-brand-blue/35 text-[10px] font-bold">Separado por lote</span>`);
-    }
-    if (row.isNoPlotRow) {
-      badges.push(`<span class="px-2 py-0.5 rounded bg-slate-700/80 text-slate-200 border border-slate-500 text-[10px] font-bold">Sin lote</span>`);
-    }
-    if (row.fromMemory && row.selectedFarmId) {
-      badges.push(`<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-brand-accent border border-emerald-500/35 text-[10px] font-bold">Recordado</span>`);
-    } else if (isUnassigned) {
-      badges.push(`<span class="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/35 text-[10px] font-bold">Sin asignar</span>`);
+    if (row.isInvalidZeroArea) {
+      badges.push(`<span class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-bold">Área 0 (inválido)</span>`);
+    } else {
+      if (row.isSplitChild) {
+        badges.push(`<span class="px-2 py-0.5 rounded bg-brand-blue/20 text-brand-blue border border-brand-blue/35 text-[10px] font-bold">Separado por lote</span>`);
+      }
+      if (row.isNoPlotRow) {
+        badges.push(`<span class="px-2 py-0.5 rounded bg-slate-700/80 text-slate-200 border border-slate-500 text-[10px] font-bold">Sin lote</span>`);
+      }
+      if (row.fromMemory && row.selectedFarmId) {
+        badges.push(`<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-brand-accent border border-emerald-500/35 text-[10px] font-bold">Recordado</span>`);
+      } else if (isUnassigned) {
+        badges.push(`<span class="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/35 text-[10px] font-bold">Sin asignar</span>`);
+      }
     }
 
     let plotSummaryHtml = "";
@@ -826,24 +858,30 @@ function renderDjiReviewTable() {
       ? `${row.startTimeFull} a ${row.endTimeFull}`
       : "";
 
-    const selectHtml = `
-      <select data-change="dji-row-farm" data-row-id="${escapeHtml(row.rowId)}" class="w-full min-w-[220px] px-2.5 py-2 rounded-xl bg-slate-900 border ${isUnassigned ? "border-amber-500/50 text-amber-200" : "border-brand-accent/45 text-white"} text-xs font-semibold">
-        <option value="">-- Sin asignar (elegir Productor / Finca) --</option>
-        ${farmOptionsHtml}
-      </select>
-    `;
+    const selectHtml = row.isInvalidZeroArea
+      ? `<span class="text-xs text-rose-300 italic">No registrable (0.00 ha)</span>`
+      : `
+        <select data-change="dji-row-farm" data-row-id="${escapeHtml(row.rowId)}" class="w-full md:min-w-[220px] px-2.5 py-2 rounded-xl bg-slate-900 border ${isUnassigned ? "border-amber-500/50 text-amber-200" : "border-brand-accent/45 text-white"} text-xs font-semibold">
+          <option value="">-- Sin asignar (elegir Productor / Finca) --</option>
+          ${farmOptionsHtml}
+        </select>
+      `;
+
+    const includeAriaLabel = escapeHtml(
+      `Incluir fila ${row.dateStr} - ${row.locationDisplay}${row.plotId ? ` (${row.plotId})` : ""}`
+    );
 
     return `
-      <tr class="hover:bg-slate-900/55 transition-colors ${row.isSplitChild ? "bg-slate-900/35" : ""}" data-dji-row="${escapeHtml(row.rowId)}">
-        <td class="py-3 px-3 text-center">
-          <input type="checkbox" ${row.included ? "checked" : ""} ${isUnassigned ? "disabled" : ""} data-change="dji-row-included" data-row-id="${escapeHtml(row.rowId)}" class="w-4 h-4 accent-emerald-400 cursor-pointer disabled:opacity-40">
+      <tr class="hover:bg-slate-900/55 transition-colors ${row.isInvalidZeroArea ? "opacity-60 bg-rose-950/20" : (row.isSplitChild ? "bg-slate-900/35" : "")}" data-dji-row="${escapeHtml(row.rowId)}">
+        <td data-label="Incluir" data-cell-inline="true" class="py-3 px-3 md:text-center">
+          <input type="checkbox" ${row.included ? "checked" : ""} ${(isUnassigned || row.isInvalidZeroArea) ? "disabled" : ""} data-change="dji-row-included" data-row-id="${escapeHtml(row.rowId)}" aria-label="${includeAriaLabel}" class="w-4 h-4 accent-emerald-400 cursor-pointer disabled:opacity-40">
         </td>
-        <td class="py-3 px-3 whitespace-nowrap">
+        <td data-label="Fecha / Horario" class="py-3 px-3 md:whitespace-nowrap">
           <div class="font-bold text-white">${escapeHtml(row.dateStr)}</div>
           <div class="text-[11px] text-slate-400">${formatDisplayDate(row.dateStr, true)}</div>
           ${timeRangeShort ? `<div class="text-[11px] font-mono text-brand-blue mt-0.5" title="${escapeHtml(timeRangeFull)}">${escapeHtml(timeRangeShort)}</div>` : ""}
         </td>
-        <td class="py-3 px-3">
+        <td data-label="Ubicación / Lotes" class="py-3 px-3">
           <div class="flex flex-wrap items-center gap-1.5">
             <span class="font-bold text-white">${escapeHtml(row.locationDisplay)}</span>
             ${badges.join(" ")}
@@ -852,16 +890,16 @@ function renderDjiReviewTable() {
           ${pilotDroneMeta.length > 0 ? `<div class="text-[11px] text-slate-400 mt-1">${pilotDroneMeta.join(" • ")}</div>` : ""}
           ${splitActionHtml}
         </td>
-        <td class="py-3 px-3 whitespace-nowrap">
+        <td data-label="Vuelos" class="py-3 px-3 md:whitespace-nowrap">
           <div class="font-bold text-white">${row.flightCount} ${row.flightCount === 1 ? "vuelo" : "vuelos"}</div>
           <div class="text-[11px] text-slate-400">${row.totalMu.toFixed(2)} mu</div>
           ${row.hasProductAmount ? `<div class="text-[11px] text-brand-blue font-mono">${row.totalProductAmount.toFixed(2)} L/Kg</div>` : ""}
         </td>
-        <td class="py-3 px-3 whitespace-nowrap">
-          <div class="font-extrabold text-brand-accent">${formatHectares(row.hectares)} ha</div>
+        <td data-label="Hectáreas / Monto" class="py-3 px-3 md:whitespace-nowrap">
+          <div class="font-extrabold ${row.isInvalidZeroArea ? "text-rose-400" : "text-brand-accent"}">${formatHectares(row.hectares)} ha</div>
           <div class="text-[11px] text-slate-300">${formatMoney(estAmount)}</div>
         </td>
-        <td class="py-3 px-3">
+        <td data-label="Productor / Finca" data-cell-actions="true" class="py-3 px-3">
           ${selectHtml}
         </td>
       </tr>
@@ -869,6 +907,7 @@ function renderDjiReviewTable() {
   }).join("");
 
   pendingRows.forEach(row => {
+    if (row.isInvalidZeroArea) return;
     const tr = tbody.querySelector(`tr[data-dji-row="${row.rowId}"]`);
     if (tr) {
       const sel = tr.querySelector("select");
@@ -880,7 +919,7 @@ function renderDjiReviewTable() {
 function onDjiRowFarmChanged(rowId, farmId) {
   if (!djiImportSession) return;
   const row = djiImportSession.rows.find(r => r.rowId === rowId);
-  if (!row) return;
+  if (!row || row.isInvalidZeroArea) return;
 
   row.selectedFarmId = farmId || "";
   row.included = Boolean(farmId);
@@ -891,7 +930,7 @@ function onDjiRowFarmChanged(rowId, farmId) {
       if (row.plotId) {
         state.dji.plotMemory[row.plotId] = farmId;
         djiImportSession.rows.forEach(other => {
-          if (!other.registered && other.rowId !== rowId && other.usePlotMemory && other.plotId === row.plotId && !other.selectedFarmId) {
+          if (!other.registered && !other.isInvalidZeroArea && other.rowId !== rowId && other.usePlotMemory && other.plotId === row.plotId && !other.selectedFarmId) {
             other.selectedFarmId = farmId;
             other.included = true;
             other.fromMemory = true;
@@ -902,7 +941,7 @@ function onDjiRowFarmChanged(rowId, farmId) {
     } else if (row.locationKey && row.locationKey !== "__sin_ubicacion__") {
       state.dji.locationMemory[row.locationKey] = farmId;
       djiImportSession.rows.forEach(other => {
-        if (!other.registered && other.rowId !== rowId && !other.usePlotMemory && other.locationKey === row.locationKey && !other.selectedFarmId) {
+        if (!other.registered && !other.isInvalidZeroArea && other.rowId !== rowId && !other.usePlotMemory && other.locationKey === row.locationKey && !other.selectedFarmId) {
           other.selectedFarmId = farmId;
           other.included = true;
           other.fromMemory = true;
@@ -921,7 +960,7 @@ function onDjiRowFarmChanged(rowId, farmId) {
 function onDjiRowIncludedChanged(rowId, checked) {
   if (!djiImportSession) return;
   const row = djiImportSession.rows.find(r => r.rowId === rowId);
-  if (!row) return;
+  if (!row || row.isInvalidZeroArea) return;
   row.included = Boolean(checked && row.selectedFarmId);
 }
 
@@ -933,11 +972,11 @@ function registerDjiImportedRows() {
   }
 
   const rowsToRegister = djiImportSession.rows.filter(
-    r => !r.registered && r.included && r.selectedFarmId && getFarmById(r.selectedFarmId)
+    r => !r.registered && !r.isInvalidZeroArea && r.hectares > 0 && r.included && r.selectedFarmId && getFarmById(r.selectedFarmId)
   );
 
   if (rowsToRegister.length === 0) {
-    showToast("Asigna al menos una fila a un Productor/Finca antes de registrar.", "warning");
+    showToast("Asigna al menos una fila válida (con área > 0) a un Productor/Finca antes de registrar.", "warning");
     return;
   }
 
@@ -975,14 +1014,14 @@ function executeDjiRegistration(rowsToRegister) {
 
   try {
     const pendingToSave = (rowsToRegister || []).filter(
-      r => !r.registered && r.included && r.selectedFarmId && getFarmById(r.selectedFarmId)
+      r => !r.registered && !r.isInvalidZeroArea && r.hectares > 0 && r.included && r.selectedFarmId && getFarmById(r.selectedFarmId)
     );
     if (pendingToSave.length === 0) return;
 
-    const defaultPilot = (state.config.pilots && state.config.pilots[0]) || "Juan Diego Cobos Anguisaca";
-    const defaultDrone = (state.config.drones && state.config.drones[0]) || "Alfa_3";
+    const defaultPilot = (state.config.pilots && state.config.pilots[0]) || "Ing. Diego Vera";
+    const defaultDrone = (state.config.drones && state.config.drones[0]) || "DJI Agras T40 #1";
     const clientRate = Number.isFinite(state.config.clientRatePerHa) ? state.config.clientRatePerHa : 15;
-    const pilotRate = Number.isFinite(state.config.pilotRatePerHa) ? state.config.pilotRatePerHa : 4.5;
+    const defaultIva = Number.isFinite(state.config.defaultIvaPct) ? state.config.defaultIvaPct : 0;
 
     const customProductInput = document.getElementById("djiProductNameInput");
     const customDoseInput = document.getElementById("djiProductDoseInput");
@@ -993,17 +1032,26 @@ function executeDjiRegistration(rowsToRegister) {
     const existingKeysSet = new Set(state.dji.importedFlightKeys || []);
     const touchedFarmIds = new Set();
     let newlyRegisteredCount = 0;
-    let newlyRegisteredHa = 0;
+    let newlyRegisteredHaScaled = 0n;
 
     pendingToSave.forEach(row => {
       const farm = getFarmById(row.selectedFarmId);
       if (!farm) return;
 
       const ha = roundHectares(row.hectares);
-      const amount = roundMoney(ha * clientRate);
-      const pilotPay = roundMoney(ha * pilotRate);
-      const orderNumber = generateNextOrderNumber(row.dateStr);
+      if (ha <= 0) return;
 
+      const calc = computeSprayFinancials({
+        pricingMode: "v5",
+        status: "Realizada",
+        hectares: ha,
+        unitRateHa: clientRate,
+        discountPct: 0,
+        ivaPct: defaultIva,
+        payments: []
+      }, state.config);
+
+      const orderNumber = generateNextOrderNumber(row.dateStr);
       const pilot = row.pilotName || defaultPilot;
       const drone = row.aircraftName || defaultDrone;
 
@@ -1037,6 +1085,21 @@ function executeDjiRegistration(rowsToRegister) {
         status: "Realizada",
         rescheduleDescription: "",
         hectares: ha,
+        pricingMode: "v5",
+        unitRateHa: calc.unitRateHa,
+        discountPct: 0,
+        ivaPct: defaultIva,
+        subtotal: calc.subtotal,
+        discount: calc.discount,
+        taxableBase: calc.taxableBase,
+        iva: calc.iva,
+        amount: calc.totalClient,
+        amountPaid: 0,
+        payments: [],
+        payMethod: "Transferencia",
+        payRef: "",
+        payBank: "",
+        payStatus: "Pendiente",
         product: productName,
         products: [{
           commercialName: productName,
@@ -1047,15 +1110,9 @@ function executeDjiRegistration(rowsToRegister) {
         }],
         drone,
         pilot,
-        pilotPay,
+        pilotPay: calc.pilotPayAmount,
         pilotPaid: false,
         notes: noteParts.join(" • "),
-        amount,
-        amountPaid: 0,
-        payMethod: "Transferencia",
-        payRef: "",
-        payBank: "",
-        payStatus: "Pendiente",
         djiFlightKeys: flightKeysCopy
       });
 
@@ -1072,7 +1129,7 @@ function executeDjiRegistration(rowsToRegister) {
       row.registered = true;
       touchedFarmIds.add(row.selectedFarmId);
       newlyRegisteredCount++;
-      newlyRegisteredHa = roundHectares(newlyRegisteredHa + ha);
+      newlyRegisteredHaScaled += roundDecimalExact._scaleBigInt(ha, 4);
     });
 
     state.dji.importedFlightKeys = Array.from(existingKeysSet);
@@ -1081,13 +1138,15 @@ function executeDjiRegistration(rowsToRegister) {
       syncFarmLastSprayFromHistory(farmId);
     });
 
+    const newlyRegisteredHa = roundDecimalExact._formatBigInt(newlyRegisteredHaScaled, 4);
     djiImportSession.registeredRowsCount += newlyRegisteredCount;
-    djiImportSession.registeredHectares = roundHectares(djiImportSession.registeredHectares + newlyRegisteredHa);
+    const prevRegScaled = roundDecimalExact._scaleBigInt(djiImportSession.registeredHectares || 0, 4);
+    djiImportSession.registeredHectares = roundDecimalExact._formatBigInt(prevRegScaled + newlyRegisteredHaScaled, 4);
 
     saveState(true);
     refreshAllViews();
 
-    const stillUnassigned = djiImportSession.rows.filter(r => !r.registered && !r.selectedFarmId).length;
+    const stillUnassigned = djiImportSession.rows.filter(r => !r.registered && !r.isInvalidZeroArea && !r.selectedFarmId).length;
     showToast(
       `Registradas ${newlyRegisteredCount} fumigación(es) (${formatHectares(newlyRegisteredHa)} ha).` +
         (stillUnassigned > 0 ? ` Quedan ${stillUnassigned} fila(s) sin asignar.` : ""),
@@ -1097,6 +1156,7 @@ function executeDjiRegistration(rowsToRegister) {
     isRegisteringDjiRows = false;
     if (djiImportSession) {
       renderDjiReviewTable();
+      safeRefreshIcons(document.getElementById("djiReviewTableBody"));
     }
   }
 }

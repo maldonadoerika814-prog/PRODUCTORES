@@ -1,7 +1,7 @@
 /* ==========================================================================
-   AgroDrone - Estado, Seguridad, Validaciones y Almacenamiento (js/state.js)
-   Control de estado global, sanitización XSS/CSV, validadores Ecuador (+593 /
-   módulo 10), motor de temporadas, cálculos financieros y respaldos JSON.
+   AgroDrone - Estado, Seguridad, Migración V4->V5 y Persistencia (js/state.js)
+   Almacenamiento optimizado (logo separado), migración no destructiva con
+   copia previa V4, sincronización entre pestañas y validadores Ecuador.
    ========================================================================== */
 
 "use strict";
@@ -11,6 +11,8 @@
 // ==========================================================================
 const STORAGE_KEY = "agrodrone_saas_data_v4_0";
 const AUTO_BACKUP_KEY = "agrodrone_saas_autobackup_v4";
+const V4_MIGRATION_BACKUP_KEY = "agrodrone_saas_v4_pre_v5_backup";
+const LOGO_STORAGE_KEY = "agrodrone_saas_logo_v5";
 const TODAY_TIMEZONE = "America/Guayaquil";
 
 const DEFAULT_WA_REMINDER_TEMPLATE =
@@ -46,7 +48,7 @@ let djiImportSession = null;
 let isRegisteringDjiRows = false;
 
 // ==========================================================================
-// 2. UTILIDADES DE SEGURIDAD, IDENTIFICADORES, NÚMEROS Y FECHAS
+// 2. UTILIDADES DE SEGURIDAD, NÚMEROS EXACTOS Y FECHAS
 // ==========================================================================
 function generateUid(prefix) {
   if (window.crypto && typeof window.crypto.randomUUID === "function") {
@@ -67,24 +69,36 @@ function isSafeImageDataUrl(val) {
   return /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=\s]+$/i.test(val.trim());
 }
 
+/**
+ * Redondeo monetario exacto a 2 decimales mediante aritmética decimal BigInt.
+ */
 function roundMoney(value) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return 0;
-  return Math.round((num + Number.EPSILON) * 100) / 100;
+  return roundDecimalExact(value, 2);
 }
 
+/**
+ * Redondeo de superficie exacto hasta 4 decimales internos (sin inflar micro-lotes DJI).
+ */
 function roundHectares(value) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return 0;
-  return Math.round((num + Number.EPSILON) * 100) / 100;
+  return roundDecimalExact(value, 4);
 }
 
 function formatHectares(value) {
-  return roundHectares(value).toFixed(2);
+  const exact = roundHectares(value);
+  if (exact === 0) return "0.00";
+  const twoDec = roundDecimalExact(exact, 2);
+  if (Math.abs(exact - twoDec) >= 0.0001) {
+    return exact.toFixed(4).replace(/0+$/, "").replace(/\.$/, ".00");
+  }
+  return twoDec.toFixed(2);
 }
 
 function formatMoney(value) {
-  return `$${roundMoney(value).toFixed(2)}`;
+  const rounded = roundMoney(value);
+  if (rounded < 0) {
+    return `-$${Math.abs(rounded).toFixed(2)}`;
+  }
+  return `$${rounded.toFixed(2)}`;
 }
 
 function escapeHtml(str) {
@@ -97,9 +111,6 @@ function escapeHtml(str) {
     .replace(/'/g, "&#39;");
 }
 
-/**
- * Escapa celdas CSV y previene inyección de fórmulas en Excel (=, +, -, @).
- */
 function csvCell(val) {
   let cleaned = String(val === null || val === undefined ? "" : val)
     .replace(/\r?\n/g, " ")
@@ -111,13 +122,32 @@ function csvCell(val) {
   return `"${cleaned}"`;
 }
 
-function safeRefreshIcons() {
+function safeRefreshIcons(root = document) {
   try {
-    if (window.lucide && typeof window.lucide.createIcons === "function") {
-      window.lucide.createIcons();
-    }
+    if (!window.lucide || typeof window.lucide.createIcons !== "function") return;
+    const targetRoot =
+      root && typeof root.querySelector === "function" && typeof root.querySelectorAll === "function"
+        ? root
+        : document;
+    if (!targetRoot.querySelector("i[data-lucide], span[data-lucide]")) return;
+
+    window.lucide.createIcons({
+      icons: window.lucide.icons,
+      nameAttr: "data-lucide",
+      attrs: { "aria-hidden": "true" },
+      root: targetRoot
+    });
+
+    targetRoot.querySelectorAll("svg[data-lucide]").forEach(svg => {
+      if (!svg.classList.contains("hidden") && !svg.classList.contains("block")) {
+        svg.classList.add("inline-block");
+      }
+      svg.classList.add("align-middle", "shrink-0");
+      svg.setAttribute("data-lucide-icon", svg.getAttribute("data-lucide") || "");
+      svg.removeAttribute("data-lucide");
+    });
   } catch (err) {
-    // Ignorar errores de iconos si no hay conexión a internet
+    // Ignorar errores de renderizado de iconos
   }
 }
 
@@ -168,7 +198,7 @@ function getGuayaquilTodayStr() {
     const formatted = formatter.format(new Date());
     if (isValidDateStr(formatted)) return formatted;
   } catch (err) {
-    // Fallback local abajo
+    // Fallback abajo
   }
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -297,22 +327,10 @@ function validateEcuadorDoc(rawDoc) {
         message: "Advertencia: el dígito verificador de la cédula no coincide (módulo 10 Ecuador). Puedes guardar de todas formas."
       };
     }
-    return {
-      valid: true,
-      warning: false,
-      normalized: norm,
-      type: "Cédula",
-      message: `Cédula válida (${norm}).`
-    };
+    return { valid: true, warning: false, normalized: norm, type: "Cédula", message: `Cédula válida (${norm}).` };
   }
   if (norm.length === 13) {
-    return {
-      valid: true,
-      warning: false,
-      normalized: norm,
-      type: "RUC",
-      message: `RUC válido (${norm}).`
-    };
+    return { valid: true, warning: false, normalized: norm, type: "RUC", message: `RUC válido (${norm}).` };
   }
   return { valid: false, warning: false, normalized: norm, message: "Debe tener 10 dígitos (cédula) o 13 dígitos (RUC)." };
 }
@@ -420,10 +438,29 @@ function showToast(message, type = "success") {
     warning: "bg-slate-950/95 border-amber-500/60 text-amber-300 shadow-amber-500/20"
   };
 
+  const iconsByType = {
+    success: "circle-check",
+    error: "circle-x",
+    warning: "triangle-alert",
+    info: "info"
+  };
+
   const toast = document.createElement("div");
-  toast.className = `pointer-events-auto px-4 py-3 rounded-xl border text-xs font-semibold shadow-xl backdrop-blur-md transition-all duration-200 ${styles[type] || styles.info}`;
-  toast.textContent = message;
+  toast.setAttribute("role", type === "error" ? "alert" : "status");
+  toast.className = `pointer-events-auto flex items-start gap-2.5 px-4 py-3 rounded-xl border text-xs font-semibold shadow-xl backdrop-blur-md transition-all duration-200 ${styles[type] || styles.info}`;
+
+  const iconEl = document.createElement("i");
+  iconEl.setAttribute("data-lucide", iconsByType[type] || "info");
+  iconEl.className = "w-4 h-4 shrink-0 mt-0.5";
+
+  const textEl = document.createElement("span");
+  textEl.className = "leading-snug break-words min-w-0";
+  textEl.textContent = message === null || message === undefined ? "" : String(message);
+
+  toast.appendChild(iconEl);
+  toast.appendChild(textEl);
   container.appendChild(toast);
+  safeRefreshIcons(toast);
 
   setTimeout(() => {
     toast.classList.add("toast-fade-out");
@@ -463,7 +500,7 @@ function closeModal(modalId) {
 }
 
 // ==========================================================================
-// 5. DATOS DE EJEMPLO (6 PRODUCTORES Y 8 FINCAS DE EL ORO)
+// 5. DATOS INICIALES ANONIMIZADOS (SIN DATOS PERSONALES REALES EN CÓDIGO)
 // ==========================================================================
 function getInitialData() {
   const todayStr = getGuayaquilTodayStr();
@@ -472,7 +509,8 @@ function getInitialData() {
 
   return {
     meta: {
-      version: "4.2",
+      version: "5.0",
+      schemaVersion: 5,
       createdAt: nowIso,
       lastBackupAt: null,
       lastAutoBackupAt: null,
@@ -483,13 +521,14 @@ function getInitialData() {
       daysRainy: 15,
       daysDry: 21,
       assocName: "AgroDrone",
-      assocPhone: "099-123-4567",
-      assocRuc: "0791234567001",
+      assocPhone: "099-000-0000",
+      assocRuc: "0790000000001",
       assocLogoDataUrl: "",
-      pilots: ["Juan Diego Cobos Anguisaca"],
-      drones: ["Alfa_3"],
+      pilots: ["Ing. Diego Vera", "Carlos Ruiz"],
+      drones: ["DJI Agras T40 #1", "DJI Agras T30 #1"],
       clientRatePerHa: 15.0,
       pilotRatePerHa: 4.5,
+      defaultIvaPct: 0,
       bgOverlayOpacity: 62,
       backupReminderDays: 3,
       autoBackupOnClose: true,
@@ -840,7 +879,7 @@ function getInitialData() {
 }
 
 // ==========================================================================
-// 6. INTEGRIDAD DE ESTADO, ALMACENAMIENTO Y AUTO-RESPALDO
+// 6. INTEGRIDAD DE ESTADO, MIGRACIÓN V4->V5 Y PERSISTENCIA OPTIMIZADA
 // ==========================================================================
 function ensureStateIntegrity() {
   const defaults = getInitialData();
@@ -848,7 +887,12 @@ function ensureStateIntegrity() {
     state = defaults;
   }
 
-  state.meta = { ...defaults.meta, ...(state.meta && typeof state.meta === "object" ? state.meta : {}) };
+  state.meta = {
+    ...defaults.meta,
+    ...(state.meta && typeof state.meta === "object" ? state.meta : {}),
+    version: "5.0",
+    schemaVersion: 5
+  };
 
   if (!state.config || typeof state.config !== "object") {
     state.config = defaults.config;
@@ -856,7 +900,6 @@ function ensureStateIntegrity() {
     state.config = { ...defaults.config, ...state.config };
     delete state.config.customBgDataUrl;
 
-    // Validar que el logo en base64 sea estrictamente data:image/... seguro (prevención XSS)
     if (!isSafeImageDataUrl(state.config.assocLogoDataUrl)) {
       state.config.assocLogoDataUrl = "";
     } else {
@@ -894,6 +937,9 @@ function ensureStateIntegrity() {
     const pilotRate = Number(state.config.pilotRatePerHa);
     state.config.pilotRatePerHa = Number.isFinite(pilotRate) && pilotRate >= 0 ? roundMoney(pilotRate) : 4.5;
 
+    const defIva = Number(state.config.defaultIvaPct);
+    state.config.defaultIvaPct = Number.isFinite(defIva) && defIva >= 0 && defIva <= 100 ? roundMoney(defIva) : 0;
+
     const op = parseInt(state.config.bgOverlayOpacity, 10);
     state.config.bgOverlayOpacity = Number.isInteger(op) && op >= 45 && op <= 80 ? op : 62;
 
@@ -912,7 +958,7 @@ function ensureStateIntegrity() {
   if (!Array.isArray(state.producers)) state.producers = defaults.producers;
   if (!Array.isArray(state.sprays)) state.sprays = defaults.sprays;
 
-  // Normalizar productores y fincas con IDs saneados
+  // Normalizar productores y fincas sin inventar hectáreas (preserva hasta 4 decimales)
   state.producers = state.producers
     .filter(p => p && typeof p === "object")
     .map((p, idx) => {
@@ -920,18 +966,22 @@ function ensureStateIntegrity() {
       const farms = Array.isArray(p.farms)
         ? p.farms
             .filter(f => f && typeof f === "object")
-            .map((f, fIdx) => ({
-              id: sanitizeEntityId(f.id, `farm-${idx}`, fIdx),
-              name: String(f.name || "Finca sin nombre").trim(),
-              sector: String(f.sector || "El Oro").trim(),
-              hectares: Math.max(0.01, roundHectares(Number(f.hectares) || 1)),
-              crop: String(f.crop || "Banano"),
-              lastSprayDate: isValidDateStr(f.lastSprayDate) ? f.lastSprayDate : "",
-              manualLastSprayDate: isValidDateStr(f.manualLastSprayDate) ? f.manualLastSprayDate : "",
-              rescheduledDate: isValidDateStr(f.rescheduledDate) ? f.rescheduledDate : null,
-              rescheduleNote: String(f.rescheduleNote || "").trim(),
-              rescheduleHistory: Array.isArray(f.rescheduleHistory) ? f.rescheduleHistory : []
-            }))
+            .map((f, fIdx) => {
+              const rawHa = Number(f.hectares);
+              const safeHa = Number.isFinite(rawHa) && rawHa > 0 ? roundHectares(rawHa) : 0.01;
+              return {
+                id: sanitizeEntityId(f.id, `farm-${idx}`, fIdx),
+                name: String(f.name || "Finca sin nombre").trim(),
+                sector: String(f.sector || "El Oro").trim(),
+                hectares: safeHa,
+                crop: String(f.crop || "Banano"),
+                lastSprayDate: isValidDateStr(f.lastSprayDate) ? f.lastSprayDate : "",
+                manualLastSprayDate: isValidDateStr(f.manualLastSprayDate) ? f.manualLastSprayDate : "",
+                rescheduledDate: isValidDateStr(f.rescheduledDate) ? f.rescheduledDate : null,
+                rescheduleNote: String(f.rescheduleNote || "").trim(),
+                rescheduleHistory: Array.isArray(f.rescheduleHistory) ? f.rescheduleHistory : []
+              };
+            })
         : [];
 
       return {
@@ -943,33 +993,17 @@ function ensureStateIntegrity() {
       };
     });
 
-  // Normalizar fumigaciones y consistencia de pagos
+  // Normalizar fumigaciones, migrar pagos V4 -> payments[] y calcular estado exacto
   state.sprays = state.sprays
     .filter(sp => sp && typeof sp === "object")
     .map((sp, idx) => {
-      const amount = Math.max(0, roundMoney(Number(sp.amount) || 0));
-      const hectares = Math.max(0.01, roundHectares(Number(sp.hectares) || 1));
-      let payStatus = ["Pagado", "Parcial", "Pendiente"].includes(sp.payStatus) ? sp.payStatus : "Pendiente";
-      let amountPaid = Math.max(0, roundMoney(Number(sp.amountPaid) || 0));
-
-      if (payStatus === "Pagado") {
-        amountPaid = amount;
-      } else if (payStatus === "Pendiente") {
-        amountPaid = 0;
-      } else if (payStatus === "Parcial") {
-        if (amountPaid >= amount && amount > 0) {
-          payStatus = "Pagado";
-          amountPaid = amount;
-        } else if (amountPaid <= 0) {
-          payStatus = "Pendiente";
-          amountPaid = 0;
-        }
-      }
-
-      const rawPilotPay = Number(sp.pilotPay);
-      const pilotPay = Number.isFinite(rawPilotPay) && rawPilotPay >= 0
-        ? roundMoney(rawPilotPay)
-        : roundMoney(hectares * state.config.pilotRatePerHa);
+      const status = ["Realizada", "Pendiente", "Reprogramada"].includes(sp.status)
+        ? sp.status
+        : "Realizada";
+      const safeDate = isValidDateStr(sp.date) ? sp.date : getGuayaquilTodayStr();
+      const rawHa = Number(sp.hectares);
+      // Corrección crítica DJI/superficie: NUNCA usar || 1 (0 no se infla a 1.00 ha)
+      const hectares = Number.isFinite(rawHa) && rawHa > 0 ? roundHectares(rawHa) : 0;
 
       const products = Array.isArray(sp.products) && sp.products.length > 0
         ? sp.products.map(pr => ({
@@ -987,36 +1021,64 @@ function ensureStateIntegrity() {
             batchLot: ""
           }];
 
-      const status = ["Realizada", "Pendiente", "Reprogramada"].includes(sp.status)
-        ? sp.status
-        : "Realizada";
-
       const djiFlightKeys = Array.isArray(sp.djiFlightKeys)
         ? Array.from(new Set(sp.djiFlightKeys.map(k => String(k || "").trim()).filter(Boolean)))
         : [];
 
-      const normalizedSpray = {
+      const draftSpray = {
+        ...sp,
         id: sanitizeEntityId(sp.id, "sp", idx),
-        orderNumber: String(sp.orderNumber || `ORD-${getGuayaquilTodayStr().substring(0, 4)}-${String(idx + 1).padStart(3, "0")}`).trim(),
+        orderNumber: String(sp.orderNumber || `ORD-${safeDate.substring(0, 4)}-${String(idx + 1).padStart(3, "0")}`).trim(),
         farmId: sp.farmId ? sanitizeEntityId(sp.farmId, "farm-ref", idx) : "",
-        date: isValidDateStr(sp.date) ? sp.date : getGuayaquilTodayStr(),
+        date: safeDate,
+        status,
+        hectares
+      };
+
+      const payments = migrateSprayPaymentsFromV4(draftSpray, idx);
+      draftSpray.payments = payments;
+
+      const fin = computeSprayFinancials(draftSpray, state.config);
+      const lastMov = fin.lastActivePayment;
+      const fallbackMethod = ["Transferencia", "Cheque", "Efectivo"].includes(sp.payMethod)
+        ? sp.payMethod
+        : "Transferencia";
+
+      const normalizedSpray = {
+        id: draftSpray.id,
+        orderNumber: draftSpray.orderNumber,
+        farmId: draftSpray.farmId,
+        date: safeDate,
         status,
         rescheduleDescription: String(sp.rescheduleDescription || "").trim(),
-        hectares,
+        hectares: fin.hectares,
+        pricingMode: fin.pricingMode,
+        unitRateHa: fin.unitRateHa,
+        discountPct: fin.discountPct,
+        ivaPct: fin.ivaPct,
+        subtotal: fin.subtotal,
+        discount: fin.discount,
+        taxableBase: fin.taxableBase,
+        iva: fin.iva,
+        amount: fin.totalClient,
+        amountPaid: fin.paidAmount,
+        payments,
+        payMethod: lastMov ? lastMov.method : fallbackMethod,
+        payRef: lastMov ? lastMov.ref : String(sp.payRef || "").trim(),
+        payBank: lastMov ? lastMov.bank : (sp.payBank === "N/A" ? "" : String(sp.payBank || "").trim()),
+        payStatus: fin.payStatus,
         product: products.map(pr => pr.commercialName).join(", "),
         products,
-        drone: String(sp.drone || state.config.drones[0] || "Alfa_3"),
-        pilot: String(sp.pilot || state.config.pilots[0] || "Juan Diego Cobos Anguisaca"),
-        pilotPay,
-        pilotPaid: Boolean(sp.pilotPaid),
-        notes: String(sp.notes !== undefined ? sp.notes : (sp.manualWeather && sp.manualWeather.notes ? sp.manualWeather.notes : "")).trim(),
-        amount,
-        amountPaid,
-        payMethod: ["Transferencia", "Cheque", "Efectivo"].includes(sp.payMethod) ? sp.payMethod : "Efectivo",
-        payRef: String(sp.payRef || "").trim(),
-        payBank: sp.payBank === "N/A" ? "" : String(sp.payBank || "").trim(),
-        payStatus
+        drone: String(sp.drone || state.config.drones[0] || "DJI Agras T40 #1"),
+        pilot: String(sp.pilot || state.config.pilots[0] || "Ing. Diego Vera"),
+        pilotPay: fin.pilotPayAmount,
+        pilotPaid: status === "Realizada" ? Boolean(sp.pilotPaid) : false,
+        notes: String(sp.notes !== undefined ? sp.notes : (sp.manualWeather && sp.manualWeather.notes ? sp.manualWeather.notes : "")).trim()
       };
+
+      if (sp.manualTotalOverride !== undefined && sp.manualTotalOverride !== null) {
+        normalizedSpray.manualTotalOverride = fin.totalClient;
+      }
 
       if (djiFlightKeys.length > 0) {
         normalizedSpray.djiFlightKeys = djiFlightKeys;
@@ -1025,7 +1087,7 @@ function ensureStateIntegrity() {
       return normalizedSpray;
     });
 
-  // Migración de fecha manual
+  // Migración de fecha manual en fincas
   state.producers.forEach(p => {
     (p.farms || []).forEach(f => {
       if (!isValidDateStr(f.manualLastSprayDate) && isValidDateStr(f.lastSprayDate)) {
@@ -1102,11 +1164,59 @@ function updateSeasonBadges() {
   }
 }
 
+function buildCompactStoragePayload() {
+  const logo = state.config && isSafeImageDataUrl(state.config.assocLogoDataUrl)
+    ? state.config.assocLogoDataUrl
+    : "";
+  try {
+    if (logo) {
+      localStorage.setItem(LOGO_STORAGE_KEY, logo);
+    } else {
+      localStorage.removeItem(LOGO_STORAGE_KEY);
+    }
+  } catch (err) {
+    // Si falla el logo aislado, se conserva en memoria
+  }
+  return {
+    ...state,
+    config: {
+      ...state.config,
+      assocLogoDataUrl: logo ? "__SEPARATE_LOGO_KEY__" : ""
+    }
+  };
+}
+
+function rehydrateLogoIntoState(parsedObj) {
+  if (!parsedObj || !parsedObj.config) return;
+  if (parsedObj.config.assocLogoDataUrl === "__SEPARATE_LOGO_KEY__") {
+    const storedLogo = localStorage.getItem(LOGO_STORAGE_KEY) || "";
+    parsedObj.config.assocLogoDataUrl = isSafeImageDataUrl(storedLogo) ? storedLogo : "";
+  } else if (isSafeImageDataUrl(parsedObj.config.assocLogoDataUrl)) {
+    try {
+      localStorage.setItem(LOGO_STORAGE_KEY, parsedObj.config.assocLogoDataUrl);
+    } catch (err) {
+      // Ignorar cuota
+    }
+  }
+}
+
 function loadState() {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
     try {
-      state = JSON.parse(saved);
+      const rawParsed = JSON.parse(saved);
+      rehydrateLogoIntoState(rawParsed);
+
+      // Si proviene de esquema V4, resguardar copia intacta antes de migrar a V5
+      const incomingSchema = rawParsed && rawParsed.meta ? Number(rawParsed.meta.schemaVersion || 4) : 4;
+      if (incomingSchema < 5 && !localStorage.getItem(V4_MIGRATION_BACKUP_KEY)) {
+        try {
+          localStorage.setItem(V4_MIGRATION_BACKUP_KEY, saved);
+        } catch (err) {
+          // Continuar migración en memoria
+        }
+      }
+      state = rawParsed;
     } catch (err) {
       state = getInitialData();
     }
@@ -1114,7 +1224,7 @@ function loadState() {
     state = getInitialData();
   }
   ensureStateIntegrity();
-  persistStateToStorage(false);
+  persistStateToStorage(false, true);
 }
 
 function persistStateToStorage(markUnexported = true, skipAutoBackup = false) {
@@ -1123,13 +1233,14 @@ function persistStateToStorage(markUnexported = true, skipAutoBackup = false) {
     state.meta.hasUnexportedChanges = true;
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const compactPayload = buildCompactStoragePayload();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(compactPayload));
   } catch (err) {
     showToast("Error: espacio local lleno. Exporta un respaldo JSON y quita logos pesados.", "error");
     return false;
   }
-  if (!skipAutoBackup) {
-    writeAutoBackupSnapshot(false);
+  if (!skipAutoBackup && markUnexported) {
+    state.meta.lastAutoBackupAt = new Date().toISOString();
   }
   if (linkedBackupFileHandle) {
     writeLinkedBackupFile().catch(() => {});
@@ -1139,15 +1250,16 @@ function persistStateToStorage(markUnexported = true, skipAutoBackup = false) {
 }
 
 function saveState(markUnexported = true) {
-  return persistStateToStorage(markUnexported);
+  return persistStateToStorage(markUnexported, false);
 }
 
 function writeAutoBackupSnapshot(silent = true) {
   try {
     const nowIso = new Date().toISOString();
+    const compactPayload = buildCompactStoragePayload();
     const snapshot = {
       savedAt: nowIso,
-      data: state
+      data: compactPayload
     };
     localStorage.setItem(AUTO_BACKUP_KEY, JSON.stringify(snapshot));
     state.meta.lastAutoBackupAt = nowIso;
@@ -1155,8 +1267,26 @@ function writeAutoBackupSnapshot(silent = true) {
       updateBackupIndicators();
     }
   } catch (err) {
-    // Si la cuota está al límite, no bloquear el guardado principal
+    // No bloquear el guardado principal
   }
+}
+
+function setupCrossTabSync() {
+  window.addEventListener("storage", event => {
+    if (event.key !== STORAGE_KEY || !event.newValue) return;
+    try {
+      const updated = JSON.parse(event.newValue);
+      rehydrateLogoIntoState(updated);
+      state = updated;
+      ensureStateIntegrity();
+      if (typeof refreshAllViews === "function") {
+        refreshAllViews();
+      }
+      showToast("Datos sincronizados desde otra pestaña abierta.", "info");
+    } catch (err) {
+      // Ignorar JSON parcial
+    }
+  });
 }
 
 async function writeLinkedBackupFile() {
@@ -1166,7 +1296,8 @@ async function writeLinkedBackupFile() {
   await writable.close();
   state.meta.lastBackupAt = new Date().toISOString();
   state.meta.hasUnexportedChanges = false;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  const compactPayload = buildCompactStoragePayload();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(compactPayload));
   updateBackupIndicators();
 }
 
@@ -1241,7 +1372,7 @@ function updateBackupIndicators() {
     const autoText = state.meta.lastAutoBackupAt
       ? ` • Último auto-respaldo local: ${formatIsoDateTimeLocal(state.meta.lastAutoBackupAt)}`
       : "";
-    settingsMeta.textContent = `Último respaldo JSON: ${info.fullText}${autoText}`;
+    settingsMeta.textContent = `Esquema V5.0 • Último respaldo JSON: ${info.fullText}${autoText}`;
   }
 
   const banner = document.getElementById("backupReminderBanner");
@@ -1269,7 +1400,7 @@ function dismissBackupBannerForSession() {
 }
 
 // ==========================================================================
-// 7. MOTOR DE FRECUENCIAS (SOLO TEMPORADA CONFIGURADA, SIN CLIMA)
+// 7. MOTOR DE FRECUENCIAS (TEMPORADA CONFIGURADA)
 // ==========================================================================
 function calculateScheduleForDate(dateStr) {
   if (!isValidDateStr(dateStr)) {
@@ -1352,29 +1483,22 @@ function syncFarmLastSprayFromHistory(farmId) {
 }
 
 // ==========================================================================
-// 8. CÁLCULOS FINANCIEROS Y BÚSQUEDAS AUXILIARES
+// 8. ACCESORES FINANCIEROS BASADOS EN js/finance.js
 // ==========================================================================
-/**
- * Solo las fumigaciones efectivamente "Realizada" generan cartera exigible o cobro real.
- */
 function isCollectibleSpray(sp) {
   return Boolean(sp && sp.status === "Realizada");
 }
 
+function getSprayFinancials(sp) {
+  return computeSprayFinancials(sp, state ? state.config : {});
+}
+
 function getSprayPaidAmount(sp) {
-  const total = Math.max(0, roundMoney(Number(sp.amount) || 0));
-  if (sp.payStatus === "Pagado") return total;
-  if (sp.payStatus === "Parcial") {
-    const paid = Math.max(0, roundMoney(Number(sp.amountPaid) || 0));
-    return Math.min(total, paid);
-  }
-  return 0;
+  return getSprayFinancials(sp).paidAmount;
 }
 
 function getSprayPendingBalance(sp) {
-  const total = Math.max(0, roundMoney(Number(sp.amount) || 0));
-  const paid = getSprayPaidAmount(sp);
-  return roundMoney(Math.max(0, total - paid));
+  return getSprayFinancials(sp).collectibleBalance;
 }
 
 function generateNextOrderNumber(dateStr) {
@@ -1407,15 +1531,22 @@ function getProducerByFarmId(farmId) {
 }
 
 // ==========================================================================
-// 9. RESPALDO, RESTAURACIÓN Y REINICIO DE DATOS (JSON)
+// 9. RESPALDO, RESTAURACIÓN Y MIGRACIÓN CON CONCILIACIÓN MONETARIA
 // ==========================================================================
 function buildExportPayload() {
   return {
     ...state,
+    config: {
+      ...state.config,
+      assocLogoDataUrl: isSafeImageDataUrl(state.config.assocLogoDataUrl)
+        ? state.config.assocLogoDataUrl
+        : ""
+    },
     meta: {
       ...state.meta,
       exportedAt: new Date().toISOString(),
-      appVersion: "4.2"
+      appVersion: "5.0",
+      schemaVersion: 5
     }
   };
 }
@@ -1425,7 +1556,8 @@ function exportSystemJSON() {
   state.meta.lastBackupAt = nowIso;
   state.meta.hasUnexportedChanges = false;
   backupBannerDismissed = false;
-  persistStateToStorage(false);
+  writeAutoBackupSnapshot(true);
+  persistStateToStorage(false, true);
 
   const payload = buildExportPayload();
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
@@ -1449,7 +1581,11 @@ function validateBackupStructure(parsed) {
   if (!parsed.config || typeof parsed.config !== "object") {
     return { valid: false, reason: "Falta la sección de configuración (config)." };
   }
-  if (parsed.config.assocLogoDataUrl && !isSafeImageDataUrl(parsed.config.assocLogoDataUrl)) {
+  if (
+    parsed.config.assocLogoDataUrl &&
+    parsed.config.assocLogoDataUrl !== "__SEPARATE_LOGO_KEY__" &&
+    !isSafeImageDataUrl(parsed.config.assocLogoDataUrl)
+  ) {
     return { valid: false, reason: "El logo incluido en la configuración tiene un formato no permitido." };
   }
   if (!Array.isArray(parsed.producers)) {
@@ -1470,6 +1606,16 @@ function validateBackupStructure(parsed) {
         return { valid: false, reason: `El respaldo contiene productores duplicados con la cédula/RUC ${d}.` };
       }
       seenDocs.add(d);
+    }
+  }
+
+  for (const sp of parsed.sprays) {
+    if (!sp || typeof sp !== "object") {
+      return { valid: false, reason: "Existe un registro de fumigación inválido en el archivo." };
+    }
+    const ha = Number(sp.hectares);
+    if (!Number.isFinite(ha) || ha <= 0) {
+      return { valid: false, reason: `La orden ${sp.orderNumber || sp.id || ""} tiene hectáreas inválidas (${sp.hectares}).` };
     }
   }
 
@@ -1495,16 +1641,17 @@ function importSystemJSON(event) {
 
       openConfirmModal(
         "Restaurar respaldo JSON",
-        `El archivo contiene ${validation.summary}. Al restaurar se reemplazarán los datos actuales (se guardará un auto-respaldo previo por seguridad). ¿Deseas continuar?`,
+        `El archivo contiene ${validation.summary}. Al restaurar se migrará automáticamente cualquier formato V4 a V5 sin perder pagos ni configuraciones (guardando un auto-respaldo previo). ¿Deseas continuar?`,
         () => {
           writeAutoBackupSnapshot(true);
+          rehydrateLogoIntoState(parsed);
           state = parsed;
           ensureStateIntegrity();
           state.meta.lastBackupAt = new Date().toISOString();
           state.meta.hasUnexportedChanges = false;
           persistStateToStorage(false, true);
           refreshAllViews();
-          showToast("Respaldo JSON restaurado con éxito.", "success");
+          showToast("Respaldo JSON restaurado y conciliado con éxito.", "success");
         },
         "Sí, restaurar respaldo",
         false
@@ -1529,6 +1676,7 @@ function requestRestoreAutoBackup() {
       showToast("El auto-respaldo local no es válido.", "error");
       return;
     }
+    rehydrateLogoIntoState(snapshot.data);
     const check = validateBackupStructure(snapshot.data);
     if (!check.valid) {
       showToast(`El auto-respaldo local no es válido: ${check.reason}`, "error");
@@ -1578,7 +1726,7 @@ function requestStartWithEmptyData() {
 function requestResetSampleData() {
   openConfirmModal(
     "Restablecer datos de ejemplo",
-    "Se reemplazarán los datos actuales por los 6 productores y 8 fincas de ejemplo de El Oro. ¿Deseas continuar?",
+    "Se reemplazarán los datos actuales por los 6 productores y 8 fincas de demostración. ¿Deseas continuar?",
     () => {
       writeAutoBackupSnapshot(true);
       state = getInitialData();

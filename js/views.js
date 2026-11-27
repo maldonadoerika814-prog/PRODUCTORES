@@ -1,7 +1,7 @@
 /* ==========================================================================
-   AgroDrone - Vistas, Modales, Gráficos y PDFs (js/views.js)
-   Renderizado modular sin manejadores JS inline (usa delegación data-*),
-   optimizado para actualizar únicamente la pestaña activa.
+   AgroDrone - Vistas, Modales, Libro de Abonos y PDFs V5.0 (js/views.js)
+   Integración completa con js/finance.js: descuentos, IVA, libro auditable de
+   abonos múltiples, separación Devengado vs. Estimado y protección de estados.
    ========================================================================== */
 
 "use strict";
@@ -28,14 +28,14 @@ function switchTab(tabId) {
   });
 
   const titles = {
-    dashboard: ["Panel Principal", "Control de pendientes, cobros, depósito al piloto y próximas fumigaciones"],
-    daily: ["Registrar Fumigados del Día", "Marca las fincas fumigadas en una fecha y regístralas todas a la vez"],
-    dji: ["Importar vuelos DJI", "Carga el Excel semanal de DJI SmartFarm (Task History), asigna lotes y registra fumigaciones"],
+    dashboard: ["Panel Principal", "Control de pendientes, cobros exigibles (devengados), estimados y depósito al piloto"],
+    daily: ["Registrar Fumigados del Día", "Marca las fincas fumigadas en una fecha, aplica descuentos opcionales y regístralas en lote"],
+    dji: ["Importar vuelos DJI", "Carga el Excel de DJI SmartFarm con precisión decimal exacta y registra fumigaciones"],
     producers: ["Productores y Fincas", "Gestión de productores, múltiples fincas, validación por cédula, WhatsApp e historial PDF"],
-    sprays: ["Fumigaciones", "Historial de aplicaciones (Realizada, Pendiente, Reprogramada), dosis y PDF"],
+    sprays: ["Fumigaciones", "Historial de aplicaciones, descuentos, IVA, pagos devengados vs. estimados y PDF"],
     calendar: ["Calendario de Fumigaciones", "Programación mensual con fechas base de temporada y fechas reprogramadas"],
-    billing: ["Cobros y Cartera", "Cobros reales por método de pago, abonos parciales, exportación CSV y WhatsApp"],
-    settings: ["Configuración y Respaldo", "Asociación, tarifas, pilotos, drones, plantillas WhatsApp, temporadas y respaldo JSON"]
+    billing: ["Cobros y Cartera", "Libro auditable de abonos múltiples, anticipos, saldos a favor, exportación CSV y WhatsApp"],
+    settings: ["Configuración y Respaldo", "Asociación, tarifas, IVA base, pilotos, drones, plantillas WhatsApp y respaldo JSON"]
   };
 
   if (titles[tabId]) {
@@ -51,11 +51,48 @@ function switchTab(tabId) {
   renderActiveTabOnly(tabId, true);
 }
 
-function closeMobileSidebar() {
+function syncSidebarInertState() {
+  const sidebar = document.getElementById("sidebar");
+  if (!sidebar) return;
+  const isHiddenOffCanvas = window.innerWidth < 1024 && sidebar.classList.contains("-translate-x-full");
+  sidebar.inert = isHiddenOffCanvas;
+  if (isHiddenOffCanvas) {
+    sidebar.setAttribute("inert", "");
+  } else {
+    sidebar.removeAttribute("inert");
+  }
+}
+
+function closeMobileSidebar(restoreFocus = false) {
   const sidebar = document.getElementById("sidebar");
   const overlay = document.getElementById("sidebarOverlay");
+  const mobileBtn = document.getElementById("mobileMenuBtn");
+  const mainEl = document.querySelector("#appShell > main") || document.querySelector("main");
+  const topbarEl = mobileBtn
+    ? mobileBtn.closest(".lg\\:hidden")
+    : document.querySelector("#appShell > .lg\\:hidden");
+
   if (sidebar) sidebar.classList.add("-translate-x-full");
   if (overlay) overlay.classList.add("hidden");
+  syncSidebarInertState();
+  document.documentElement.classList.remove("drawer-open");
+  document.body.classList.remove("drawer-open");
+
+  if (mainEl) {
+    mainEl.inert = false;
+    mainEl.removeAttribute("inert");
+  }
+  if (topbarEl) {
+    topbarEl.inert = false;
+    topbarEl.removeAttribute("inert");
+  }
+
+  if (mobileBtn) {
+    mobileBtn.setAttribute("aria-expanded", "false");
+    if (restoreFocus === true) {
+      mobileBtn.focus();
+    }
+  }
 }
 
 function renderActiveTabOnly(tabId, isTabSwitch = false) {
@@ -73,10 +110,6 @@ function renderActiveTabOnly(tabId, isTabSwitch = false) {
   else if (tabId === "settings") populateSettingsForm();
 }
 
-/**
- * Actualiza encabezados globales y renderiza únicamente la vista visible actual
- * para evitar reconstruir tablas ocultas y gráficos innecesariamente.
- */
 function refreshAllViews() {
   applyBackgroundAppearance();
   updateSeasonBadges();
@@ -86,7 +119,7 @@ function refreshAllViews() {
 }
 
 // ==========================================================================
-// 2. PANEL PRINCIPAL (DASHBOARD Y GRÁFICOS)
+// 2. PANEL PRINCIPAL (DASHBOARD: DEVENGADO VS. ESTIMADO)
 // ==========================================================================
 function renderDashboard() {
   const sampleBanner = document.getElementById("sampleDataNoticeBanner");
@@ -99,37 +132,26 @@ function renderDashboard() {
   const weekLimitStr = addDaysToDateStr(todayStr, 7);
   const currentMonthPrefix = todayStr.substring(0, 7);
 
-  document.getElementById("kpiProducersCount").textContent = state.producers.length;
-  document.getElementById("kpiFarmsCount").textContent = `${farms.length} ${farms.length === 1 ? "finca registrada" : "fincas registradas"}`;
+  const summary = computePortfolioSummary(state.sprays, state.config);
 
-  let totalHa = 0;
   let monthSprays = 0;
-  let pendingAmount = 0;
-  let pendingCount = 0;
-  let expiredCount = 0;
-  let totalPilotPending = 0;
-
   state.sprays.forEach(sp => {
-    if (isCollectibleSpray(sp)) {
-      totalHa = roundHectares(totalHa + (Number(sp.hectares) || 0));
-      if (sp.date && sp.date.startsWith(currentMonthPrefix)) monthSprays++;
-      if (!sp.pilotPaid) {
-        totalPilotPending = roundMoney(totalPilotPending + (Number(sp.pilotPay) || 0));
-      }
-      const saldo = getSprayPendingBalance(sp);
-      if (saldo > 0) {
-        pendingAmount = roundMoney(pendingAmount + saldo);
-        pendingCount++;
-      }
+    if (sp.status === "Realizada" && sp.date && sp.date.startsWith(currentMonthPrefix)) {
+      monthSprays++;
     }
   });
 
-  document.getElementById("kpiTotalHectares").textContent = `${formatHectares(totalHa)} ha`;
+  document.getElementById("kpiProducersCount").textContent = state.producers.length;
+  document.getElementById("kpiFarmsCount").textContent = `${farms.length} ${farms.length === 1 ? "finca registrada" : "fincas registradas"}`;
+  document.getElementById("kpiTotalHectares").textContent = `${formatHectares(summary.realizedHectares)} ha`;
   document.getElementById("kpiMonthSprays").textContent = monthSprays;
   document.getElementById("kpiMonthLabel").textContent = `Realizadas en ${currentMonthPrefix}`;
-  document.getElementById("kpiPendingAmount").textContent = formatMoney(pendingAmount);
-  document.getElementById("kpiPendingCount").textContent = `${pendingCount} ${pendingCount === 1 ? "cuenta con saldo" : "cuentas con saldo"}`;
+  document.getElementById("kpiPendingAmount").textContent = formatMoney(summary.collectibleTotal);
+  document.getElementById("kpiPendingCount").textContent =
+    `${summary.collectibleOrdersCount} ${summary.collectibleOrdersCount === 1 ? "cuenta exigible" : "cuentas exigibles"}` +
+    (summary.billedEstimated > 0 ? ` (+${formatMoney(summary.billedEstimated)} est.)` : "");
 
+  let expiredCount = 0;
   const upcomingRows = [];
   const pendingItems = [];
 
@@ -216,23 +238,26 @@ function renderDashboard() {
 
       return `
         <tr class="hover:bg-slate-900/55 transition-colors">
-          <td class="py-3 px-3">
+          <td data-label="Productor / Finca" class="py-3 px-3">
             <div class="font-bold text-white">${escapeHtml(farm.name)}</div>
             <div class="text-[11px] text-slate-300">${escapeHtml(prod ? prod.name : "")} • ${escapeHtml(farm.crop)} (${formatHectares(farm.hectares)} ha)</div>
           </td>
-          <td class="py-3 px-3 text-slate-300 text-xs">${escapeHtml(farm.sector)}</td>
-          <td class="py-3 px-3 text-slate-300 text-xs whitespace-nowrap">${sched.hasLastSpray ? formatDisplayDate(sched.lastSprayStr) : '<span class="text-slate-400 italic">Sin fumigación registrada</span>'}</td>
-          <td class="py-3 px-3 whitespace-nowrap">
+          <td data-label="Sector" class="py-3 px-3 text-slate-300 text-xs">${escapeHtml(farm.sector)}</td>
+          <td data-label="Última Fumig." class="py-3 px-3 text-slate-300 text-xs md:whitespace-nowrap">${sched.hasLastSpray ? formatDisplayDate(sched.lastSprayStr) : '<span class="text-slate-400 italic">Sin fumigación registrada</span>'}</td>
+          <td data-label="Próxima Fecha" class="py-3 px-3 md:whitespace-nowrap">
             <div class="font-bold ${sched.hasReschedule ? "text-amber-300" : (sched.effectiveDateStr ? "text-white" : "text-slate-400")}">${sched.effectiveDateStr ? formatDisplayDate(sched.effectiveDateStr) : "Sin fumigación registrada"}</div>
             ${sched.hasReschedule && sched.baseDateStr ? `<div class="text-[10px] text-slate-400">Base: ${formatDisplayDate(sched.baseDateStr)}</div>` : ""}
           </td>
-          <td class="py-3 px-3 whitespace-nowrap">${dateBadge}</td>
-          <td class="py-3 px-3 max-w-xs">${detailText}</td>
-          <td class="py-3 px-3 text-right whitespace-nowrap space-x-1">
-            <button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(farm.id)}" class="px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 rounded-lg text-[11px] font-bold border border-amber-500/35">
-              Reprogramar
-            </button>
-            ${waBtn}
+          <td data-label="Estado Fecha" class="py-3 px-3 md:whitespace-nowrap">${dateBadge}</td>
+          <td data-label="Detalle" class="py-3 px-3 md:max-w-xs">${detailText}</td>
+          <td data-label="Acciones" data-cell-actions="true" class="py-3 px-3 md:text-right md:whitespace-nowrap">
+            <div class="flex flex-wrap items-center justify-start md:justify-end gap-1.5">
+              <button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(farm.id)}" class="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 rounded-lg text-[11px] font-bold border border-amber-500/35">
+                <i data-lucide="calendar-clock" class="w-3.5 h-3.5"></i>
+                <span>Reprogramar</span>
+              </button>
+              ${waBtn}
+            </div>
           </td>
         </tr>
       `;
@@ -240,8 +265,12 @@ function renderDashboard() {
   }
 
   document.getElementById("kpiExpiredCount").textContent = expiredCount;
-  document.getElementById("pendientesPorCobrar").textContent = formatMoney(pendingAmount);
-  document.getElementById("pendientesDepositoPiloto").textContent = formatMoney(totalPilotPending);
+  document.getElementById("pendientesPorCobrar").textContent = formatMoney(summary.collectibleTotal);
+  document.getElementById("pendientesDepositoPiloto").textContent = formatMoney(summary.pilotAccruedPending);
+  const estInfoEl = document.getElementById("pendientesEstimadoInfo");
+  if (estInfoEl) {
+    estInfoEl.textContent = `${formatMoney(summary.billedEstimated)} cliente • ${formatMoney(summary.pilotEstimated)} piloto`;
+  }
 
   pendingItems.sort((a, b) => a.urgencyRank - b.urgencyRank || a.sched.effectiveDateStr.localeCompare(b.sched.effectiveDateStr));
   const pendientesContainer = document.getElementById("pendientesListContainer");
@@ -272,9 +301,10 @@ function renderDashboard() {
                   : `Próxima fecha base: <strong class="text-brand-accent">${formatDisplayDate(item.sched.baseDateStr)}</strong> (+${item.sched.daysToAdd}d)`}
               </div>
             </div>
-            <div class="flex items-center justify-end space-x-1.5 pt-2 border-t border-white/10">
-              <button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(item.farm.id)}" class="px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/35 text-[11px] font-bold">
-                Reprogramar
+            <div class="flex flex-wrap items-center justify-end gap-1.5 pt-2 border-t border-white/10">
+              <button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(item.farm.id)}" class="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/35 text-[11px] font-bold">
+                <i data-lucide="calendar-clock" class="w-3.5 h-3.5"></i>
+                <span>Reprogramar</span>
               </button>
               ${waBtn}
             </div>
@@ -284,11 +314,11 @@ function renderDashboard() {
     }
   }
 
-  renderDashboardCharts();
+  renderDashboardCharts(summary);
   safeRefreshIcons();
 }
 
-function renderDashboardCharts() {
+function renderDashboardCharts(precomputedSummary = null) {
   const ctxHectaresEl = document.getElementById("chartHectaresMonth");
   const ctxPaymentEl = document.getElementById("chartPaymentMethods");
   if (!ctxHectaresEl || !ctxPaymentEl || typeof Chart === "undefined") return;
@@ -296,17 +326,20 @@ function renderDashboardCharts() {
   if (chartHectaresInstance) chartHectaresInstance.destroy();
   if (chartPaymentInstance) chartPaymentInstance.destroy();
 
-  const monthBuckets = {};
+  const monthBucketsScaled = {};
   state.sprays.forEach(sp => {
-    if (isCollectibleSpray(sp) && isValidDateStr(sp.date)) {
+    if (sp.status === "Realizada" && isValidDateStr(sp.date)) {
       const ym = sp.date.substring(0, 7);
-      monthBuckets[ym] = roundHectares((monthBuckets[ym] || 0) + (Number(sp.hectares) || 0));
+      const haScaled = roundDecimalExact._scaleBigInt(sp.hectares, 4);
+      monthBucketsScaled[ym] = (monthBucketsScaled[ym] || 0n) + haScaled;
     }
   });
 
-  const sortedMonths = Object.keys(monthBuckets).sort();
+  const sortedMonths = Object.keys(monthBucketsScaled).sort();
   const labels = sortedMonths.length > 0 ? sortedMonths : [getGuayaquilTodayStr().substring(0, 7)];
-  const values = sortedMonths.length > 0 ? sortedMonths.map(m => monthBuckets[m]) : [0];
+  const values = sortedMonths.length > 0
+    ? sortedMonths.map(m => roundDecimalExact._formatBigInt(monthBucketsScaled[m], 4))
+    : [0];
 
   chartHectaresInstance = new Chart(ctxHectaresEl.getContext("2d"), {
     type: "bar",
@@ -339,28 +372,24 @@ function renderDashboardCharts() {
     }
   });
 
-  let transferCollected = 0;
-  let checkCollected = 0;
-  let cashCollected = 0;
-  let totalPending = 0;
-
-  state.sprays.forEach(sp => {
-    if (!isCollectibleSpray(sp)) return;
-    const paid = getSprayPaidAmount(sp);
-    const pending = getSprayPendingBalance(sp);
-    totalPending = roundMoney(totalPending + pending);
-
-    if (sp.payMethod === "Transferencia") transferCollected = roundMoney(transferCollected + paid);
-    else if (sp.payMethod === "Cheque") checkCollected = roundMoney(checkCollected + paid);
-    else cashCollected = roundMoney(cashCollected + paid);
-  });
+  const summary = precomputedSummary || computePortfolioSummary(state.sprays, state.config);
 
   chartPaymentInstance = new Chart(ctxPaymentEl.getContext("2d"), {
     type: "doughnut",
     data: {
-      labels: ["Transferencia (Cobrado)", "Cheque (Cobrado)", "Efectivo (Cobrado)", "Por Cobrar"],
+      labels: [
+        "Transferencia (Cobrado)",
+        "Cheque (Cobrado)",
+        "Efectivo (Cobrado)",
+        "Por Cobrar (Devengado)"
+      ],
       datasets: [{
-        data: [transferCollected, checkCollected, cashCollected, totalPending],
+        data: [
+          summary.collectedByMethod.Transferencia,
+          summary.collectedByMethod.Cheque,
+          summary.collectedByMethod.Efectivo,
+          summary.collectibleTotal
+        ],
         backgroundColor: ["#00d4ff", "#f59e0b", "#00ff88", "#ef4444"],
         borderColor: "#0b1324",
         borderWidth: 3
@@ -377,7 +406,7 @@ function renderDashboardCharts() {
 }
 
 // ==========================================================================
-// 3. REGISTRAR FUMIGADOS DEL DÍA (REGISTRO EN LOTE)
+// 3. REGISTRAR FUMIGADOS DEL DÍA (CON DESCUENTO EXACTO Y ASIENTO V5)
 // ==========================================================================
 function initDailyBatchTab() {
   const dateInput = document.getElementById("dailySprayDate");
@@ -406,23 +435,30 @@ function renderDailyBatchList() {
     return;
   }
 
-  const pilotsOpts = (state.config.pilots || ["Juan Diego Cobos Anguisaca"])
+  const pilotsOpts = (state.config.pilots || ["Ing. Diego Vera"])
     .map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
-  const dronesOpts = (state.config.drones || ["Alfa_3"])
+  const dronesOpts = (state.config.drones || ["DJI Agras T40 #1"])
     .map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join("");
 
   const clientRate = Number.isFinite(state.config.clientRatePerHa) ? state.config.clientRatePerHa : 15;
-  const pilotRate = Number.isFinite(state.config.pilotRatePerHa) ? state.config.pilotRatePerHa : 4.5;
+  const defaultIva = Number.isFinite(state.config.defaultIvaPct) ? state.config.defaultIvaPct : 0;
 
   container.innerHTML = farms.map(farm => {
     const prod = getProducerByFarmId(farm.id);
     const sched = calculateFarmSchedule(farm);
     const ha = roundHectares(farm.hectares);
-    const defaultAmt = roundMoney(ha * clientRate).toFixed(2);
-    const defaultPilotPay = roundMoney(ha * pilotRate).toFixed(2);
+    const calc = computeSprayFinancials({
+      pricingMode: "v5",
+      status: "Realizada",
+      hectares: ha,
+      unitRateHa: clientRate,
+      discountPct: 0,
+      ivaPct: defaultIva,
+      payments: []
+    }, state.config);
 
     return `
-      <div class="daily-farm-card rounded-2xl border border-brand-border bg-slate-950/65 p-4 transition-all" data-farm-id="${escapeHtml(farm.id)}" data-search="${escapeHtml((farm.name + " " + (prod ? prod.name : "") + " " + farm.sector).toLowerCase())}">
+      <div class="daily-farm-card rounded-2xl border border-brand-border bg-slate-950/65 p-4 transition-all tabular-nums" data-farm-id="${escapeHtml(farm.id)}" data-search="${escapeHtml((farm.name + " " + (prod ? prod.name : "") + " " + farm.sector).toLowerCase())}">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <label class="flex items-center space-x-3 cursor-pointer select-none flex-1">
             <input type="checkbox" data-change="daily-farm-cb" class="daily-farm-cb w-5 h-5 accent-emerald-400 rounded cursor-pointer shrink-0">
@@ -435,10 +471,14 @@ function renderDailyBatchList() {
         </div>
 
         <div class="daily-fields hidden mt-4 pt-4 border-t border-white/10 space-y-3">
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
             <div>
               <label class="block text-[10px] font-bold text-slate-300 uppercase mb-1">Hectáreas *</label>
-              <input type="number" step="0.01" min="0.01" data-input="daily-ha" class="daily-ha w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-xs" value="${formatHectares(ha)}">
+              <input type="number" step="0.0001" min="0.0001" data-input="daily-ha" class="daily-ha w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-xs" value="${ha}">
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-300 uppercase mb-1">Descuento (%)</label>
+              <input type="number" step="0.01" min="0" max="100" data-input="daily-discount" class="daily-discount w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-xs" value="0">
             </div>
             <div>
               <label class="block text-[10px] font-bold text-slate-300 uppercase mb-1">Piloto</label>
@@ -449,22 +489,25 @@ function renderDailyBatchList() {
               <select class="daily-drone w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-xs">${dronesOpts}</select>
             </div>
             <div>
-              <label class="block text-[10px] font-bold text-slate-300 uppercase mb-1">Monto Cliente ($) *</label>
-              <input type="number" step="0.01" min="0" class="daily-amount w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-xs" value="${defaultAmt}">
+              <label class="block text-[10px] font-bold text-slate-300 uppercase mb-1">Total Cliente ($) *</label>
+              <input type="number" step="0.01" min="0" class="daily-amount w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-brand-accent/40 text-white font-bold text-xs" value="${calc.totalClient.toFixed(2)}">
             </div>
             <div>
-              <label class="block text-[10px] font-bold text-slate-300 uppercase mb-1">Depósito Piloto ($)</label>
-              <input type="number" step="0.01" min="0" class="daily-pilot-pay w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-brand-border text-brand-blue text-xs" value="${defaultPilotPay}">
+              <label class="block text-[10px] font-bold text-slate-300 uppercase mb-1">Pago Piloto ($)</label>
+              <input type="number" step="0.01" min="0" class="daily-pilot-pay w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-brand-border text-brand-blue text-xs" value="${calc.pilotPayAmount.toFixed(2)}">
             </div>
           </div>
 
           <div class="p-3 rounded-xl bg-slate-900/75 border border-brand-accent/25 space-y-2">
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between gap-2">
               <span class="text-[10px] font-bold uppercase text-brand-accent">Producto(s) y Dosis</span>
-              <button type="button" data-action="add-daily-product" class="text-[11px] px-2.5 py-1 rounded bg-brand-accent/20 text-brand-accent hover:bg-brand-accent/30 font-bold">+ Producto</button>
+              <button type="button" data-action="add-daily-product" class="inline-flex items-center space-x-1 text-[11px] px-2.5 py-1 rounded-lg bg-brand-accent/20 text-brand-accent hover:bg-brand-accent/30 font-bold">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                <span>Producto</span>
+              </button>
             </div>
             <div class="daily-products-list space-y-2">
-              <div class="daily-prod-row grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+              <div class="daily-prod-row grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
                 <input type="text" class="dp-name px-2.5 py-1.5 rounded-lg bg-slate-950 border border-brand-border text-white text-xs" placeholder="Nombre comercial *" value="Fungicida Agrícola">
                 <input type="text" class="dp-active px-2.5 py-1.5 rounded-lg bg-slate-950 border border-brand-border text-white text-xs" placeholder="Ing. activo (opc.)">
                 <input type="text" class="dp-dose px-2.5 py-1.5 rounded-lg bg-slate-950 border border-brand-border text-white text-xs" placeholder="Dosis/ha (ej. 1 L/ha)">
@@ -474,7 +517,7 @@ function renderDailyBatchList() {
             </div>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
             <div>
               <label class="block text-[10px] font-bold text-slate-300 uppercase mb-1">Método de Pago</label>
               <select class="daily-pay-method w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-brand-border text-white text-xs">
@@ -550,14 +593,22 @@ function updateDailySelectedCounter() {
   }
 }
 
-function recalcDailyCardAmounts(haInput) {
-  const card = haInput.closest(".daily-farm-card");
+function recalcDailyCardAmounts(inputEl) {
+  const card = inputEl.closest(".daily-farm-card");
   if (!card) return;
-  const ha = roundHectares(Math.max(0, parseFloat(haInput.value) || 0));
-  const clientRate = Number.isFinite(state.config.clientRatePerHa) ? state.config.clientRatePerHa : 15;
-  const pilotRate = Number.isFinite(state.config.pilotRatePerHa) ? state.config.pilotRatePerHa : 4.5;
-  card.querySelector(".daily-amount").value = roundMoney(ha * clientRate).toFixed(2);
-  card.querySelector(".daily-pilot-pay").value = roundMoney(ha * pilotRate).toFixed(2);
+  const ha = roundHectares(Math.max(0, parseFloat(card.querySelector(".daily-ha").value) || 0));
+  const disc = Math.min(100, Math.max(0, parseFloat(card.querySelector(".daily-discount").value) || 0));
+  const calc = computeSprayFinancials({
+    pricingMode: "v5",
+    status: "Realizada",
+    hectares: ha,
+    unitRateHa: state.config.clientRatePerHa,
+    discountPct: disc,
+    ivaPct: state.config.defaultIvaPct || 0,
+    payments: []
+  }, state.config);
+  card.querySelector(".daily-amount").value = calc.totalClient.toFixed(2);
+  card.querySelector(".daily-pilot-pay").value = calc.pilotPayAmount.toFixed(2);
 }
 
 function toggleDailyPartialInput(selectEl) {
@@ -573,7 +624,7 @@ function addDailyProductRow(btn) {
   if (!fields) return;
   const list = fields.querySelector(".daily-products-list");
   const row = document.createElement("div");
-  row.className = "daily-prod-row grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2";
+  row.className = "daily-prod-row grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2";
   row.innerHTML = `
     <input type="text" class="dp-name px-2.5 py-1.5 rounded-lg bg-slate-950 border border-brand-border text-white text-xs" placeholder="Nombre comercial *">
     <input type="text" class="dp-active px-2.5 py-1.5 rounded-lg bg-slate-950 border border-brand-border text-white text-xs" placeholder="Ing. activo (opc.)">
@@ -581,10 +632,13 @@ function addDailyProductRow(btn) {
     <input type="text" class="dp-vol px-2.5 py-1.5 rounded-lg bg-slate-950 border border-brand-border text-white text-xs" placeholder="Vol. total">
     <div class="flex items-center space-x-1">
       <input type="text" class="dp-lot w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-brand-border text-white text-xs" placeholder="Lote">
-      <button type="button" data-action="remove-daily-product" class="text-rose-400 px-2 py-1 hover:bg-rose-500/20 rounded-lg font-bold" title="Quitar producto">×</button>
+      <button type="button" data-action="remove-daily-product" class="p-1.5 text-rose-400 hover:bg-rose-500/20 rounded-lg shrink-0" title="Quitar producto" aria-label="Quitar producto">
+        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+      </button>
     </div>
   `;
   list.appendChild(row);
+  safeRefreshIcons(row);
 }
 
 function saveDailyBatchSprays() {
@@ -609,10 +663,11 @@ function saveDailyBatchSprays() {
     if (!farm) continue;
 
     const hectares = parseFloat(card.querySelector(".daily-ha").value);
+    const discountPct = parseFloat(card.querySelector(".daily-discount").value || "0");
     const amount = parseFloat(card.querySelector(".daily-amount").value);
     const pilotPay = parseFloat(card.querySelector(".daily-pilot-pay").value);
     const payMethod = card.querySelector(".daily-pay-method").value;
-    let payStatus = card.querySelector(".daily-pay-status").value;
+    const rawPayStatus = card.querySelector(".daily-pay-status").value;
     const payRef = card.querySelector(".daily-pay-ref").value.trim();
     const notes = card.querySelector(".daily-notes").value.trim();
     const pilot = card.querySelector(".daily-pilot").value;
@@ -623,6 +678,11 @@ function saveDailyBatchSprays() {
       showToast(`Hectáreas inválidas en "${farm.name}".`, "error");
       return;
     }
+    if (!Number.isFinite(discountPct) || discountPct < 0 || discountPct > 100) {
+      card.classList.add("border-rose-500");
+      showToast(`Descuento inválido en "${farm.name}" (debe estar entre 0% y 100%).`, "error");
+      return;
+    }
     if (!Number.isFinite(amount) || amount < 0) {
       card.classList.add("border-rose-500");
       showToast(`Monto cliente inválido en "${farm.name}".`, "error");
@@ -630,31 +690,22 @@ function saveDailyBatchSprays() {
     }
     if (!Number.isFinite(pilotPay) || pilotPay < 0) {
       card.classList.add("border-rose-500");
-      showToast(`Depósito al piloto inválido en "${farm.name}".`, "error");
+      showToast(`Pago al piloto inválido en "${farm.name}".`, "error");
       return;
     }
 
-    let amountPaid = 0;
-    if (payStatus === "Pagado") {
-      amountPaid = roundMoney(amount);
-    } else if (payStatus === "Parcial") {
+    let initialPaymentCents = 0;
+    const totalCents = toSafeCents(amount);
+    if (rawPayStatus === "Pagado") {
+      initialPaymentCents = totalCents;
+    } else if (rawPayStatus === "Parcial") {
       const rawPaid = parseFloat(card.querySelector(".daily-paid-amt").value);
       if (!Number.isFinite(rawPaid) || rawPaid <= 0) {
         card.classList.add("border-rose-500");
         showToast(`En "${farm.name}", el abono parcial debe ser mayor a $0.00.`, "error");
         return;
       }
-      if (rawPaid > amount) {
-        card.classList.add("border-rose-500");
-        showToast(`En "${farm.name}", el abono ($${rawPaid.toFixed(2)}) no puede superar el monto total ($${amount.toFixed(2)}).`, "error");
-        return;
-      }
-      if (roundMoney(rawPaid) === roundMoney(amount)) {
-        payStatus = "Pagado";
-        amountPaid = roundMoney(amount);
-      } else {
-        amountPaid = roundMoney(rawPaid);
-      }
+      initialPaymentCents = toSafeCents(rawPaid);
     }
 
     const products = [];
@@ -677,16 +728,15 @@ function saveDailyBatchSprays() {
     }
 
     entriesToSave.push({
-      farm,
       farmId,
       hectares: roundHectares(hectares),
+      discountPct: roundMoney(discountPct),
       pilot,
       drone,
       amount: roundMoney(amount),
       pilotPay: roundMoney(pilotPay),
       payMethod,
-      payStatus,
-      amountPaid,
+      initialPaymentCents,
       payRef,
       notes,
       products
@@ -695,7 +745,32 @@ function saveDailyBatchSprays() {
 
   entriesToSave.forEach(entry => {
     const orderNum = generateNextOrderNumber(dateStr);
-    state.sprays.unshift({
+    const baseCalc = computeSprayFinancials({
+      pricingMode: "v5",
+      status: "Realizada",
+      hectares: entry.hectares,
+      unitRateHa: state.config.clientRatePerHa,
+      discountPct: entry.discountPct,
+      ivaPct: state.config.defaultIvaPct || 0,
+      payments: []
+    }, state.config);
+
+    const hasManualTotal = toSafeCents(entry.amount) !== baseCalc.totalClientCents;
+    const payments = entry.initialPaymentCents > 0
+      ? [normalizePaymentMovement({
+          id: generateUid("pay"),
+          date: dateStr,
+          amountCents: entry.initialPaymentCents,
+          method: entry.payMethod,
+          ref: entry.payRef,
+          bank: "",
+          note: "Pago inicial registrado en Fumigados del Día",
+          voided: false,
+          createdAt: new Date().toISOString()
+        }, 0, dateStr)]
+      : [];
+
+    const draft = {
       id: generateUid("sp"),
       orderNumber: orderNum,
       farmId: entry.farmId,
@@ -703,6 +778,12 @@ function saveDailyBatchSprays() {
       status: "Realizada",
       rescheduleDescription: "",
       hectares: entry.hectares,
+      pricingMode: "v5",
+      unitRateHa: state.config.clientRatePerHa,
+      discountPct: entry.discountPct,
+      ivaPct: state.config.defaultIvaPct || 0,
+      manualTotalOverride: hasManualTotal ? entry.amount : undefined,
+      payments,
       product: entry.products.map(p => p.commercialName).join(", "),
       products: entry.products,
       drone: entry.drone,
@@ -710,14 +791,21 @@ function saveDailyBatchSprays() {
       pilotPay: entry.pilotPay,
       pilotPaid: false,
       notes: entry.notes,
-      amount: entry.amount,
-      amountPaid: entry.amountPaid,
       payMethod: entry.payMethod,
       payRef: entry.payRef,
-      payBank: "",
-      payStatus: entry.payStatus
-    });
+      payBank: ""
+    };
 
+    const fin = computeSprayFinancials(draft, state.config);
+    draft.subtotal = fin.subtotal;
+    draft.discount = fin.discount;
+    draft.taxableBase = fin.taxableBase;
+    draft.iva = fin.iva;
+    draft.amount = fin.totalClient;
+    draft.amountPaid = fin.paidAmount;
+    draft.payStatus = fin.payStatus;
+
+    state.sprays.unshift(draft);
     syncFarmLastSprayFromHistory(entry.farmId);
   });
 
@@ -790,7 +878,7 @@ function renderProducersList() {
       }
 
       farmsHtml += `
-        <div class="p-3.5 rounded-xl bg-slate-950/70 border border-brand-border hover:border-brand-accent/35 transition-all space-y-2.5">
+        <div class="p-3.5 rounded-xl bg-slate-950/70 border border-brand-border hover:border-brand-accent/35 transition-all space-y-2.5 tabular-nums">
           <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
             <div>
               <div class="flex flex-wrap items-center gap-2">
@@ -800,8 +888,9 @@ function renderProducersList() {
               <p class="text-[11px] text-slate-300 mt-0.5">${escapeHtml(farm.crop)} • ${formatHectares(farm.hectares)} ha • ${escapeHtml(farm.sector)}</p>
             </div>
             <div class="flex flex-wrap items-center gap-1.5 shrink-0">
-              <button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(farm.id)}" class="px-2 py-1.5 rounded-lg bg-amber-500/15 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30 text-[11px] font-bold">
-                Reprog.
+              <button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(farm.id)}" class="inline-flex items-center space-x-1 px-2 py-1.5 rounded-lg bg-amber-500/15 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30 text-[11px] font-bold">
+                <i data-lucide="calendar-clock" class="w-3.5 h-3.5"></i>
+                <span>Reprog.</span>
               </button>
               ${waBtn}
               <button type="button" data-action="open-farm-edit-modal" data-prod-id="${escapeHtml(prod.id)}" data-farm-id="${escapeHtml(farm.id)}" class="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white border border-brand-border" title="Editar finca">
@@ -853,7 +942,7 @@ function renderProducersList() {
               <span>PDF</span>
             </button>
             <button type="button" data-action="open-producer-modal" data-prod-id="${escapeHtml(prod.id)}" class="p-2 bg-slate-800 text-slate-300 rounded-xl hover:text-white text-xs border border-brand-border" title="Editar datos del productor">
-              <i data-lucide="edit-2" class="w-4 h-4"></i>
+              <i data-lucide="pencil" class="w-4 h-4"></i>
             </button>
             <button type="button" data-action="delete-producer" data-prod-id="${escapeHtml(prod.id)}" class="p-2 bg-rose-500/10 text-rose-300 rounded-xl hover:bg-rose-500/25 text-xs border border-rose-500/30" title="Eliminar productor">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -870,7 +959,7 @@ function renderProducersList() {
   });
 
   if (cardsHtml.length === 0) {
-    container.innerHTML = `<div class="col-span-1 lg:col-span-2 text-center py-10 text-sm text-slate-300 glass-card rounded-2xl">No se encontraron productores con los filtros seleccionados.</div>`;
+    container.innerHTML = `<div class="col-span-full text-center py-10 text-sm text-slate-300 glass-card rounded-2xl">No se encontraron productores con los filtros seleccionados.</div>`;
   } else {
     container.innerHTML = cardsHtml.join("");
   }
@@ -1000,7 +1089,7 @@ function openFarmEditModal(prodId, farmId) {
 
   document.getElementById("farmName").value = farm.name;
   document.getElementById("farmCrop").value = farm.crop;
-  document.getElementById("farmHectares").value = formatHectares(farm.hectares);
+  document.getElementById("farmHectares").value = farm.hectares;
   document.getElementById("farmSector").value = farm.sector;
   const lastSprayInput = document.getElementById("farmLastSprayDate");
   lastSprayInput.value = farm.lastSprayDate || "";
@@ -1211,8 +1300,27 @@ function requestDeleteFarm(prodId, farmId) {
 }
 
 // ==========================================================================
-// 5. TABLA Y CRUD DE FUMIGACIONES INDIVIDUALES
+// 5. TABLA Y CRUD DE FUMIGACIONES (DEVENGADO VS ESTIMADO + TRANSICIONES)
 // ==========================================================================
+function renderPayStatusBadgeHtml(fin) {
+  if (fin.payStatus === "Pagado") {
+    return `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-brand-accent">Pagado</span>`;
+  }
+  if (fin.payStatus === "Parcial") {
+    return `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/20 text-amber-300">Parcial (${formatMoney(fin.paidAmount)})</span>`;
+  }
+  if (fin.payStatus === "Saldo a favor") {
+    return `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-brand-blue/20 text-brand-blue">Saldo a favor (+${formatMoney(fin.creditFavor)})</span>`;
+  }
+  if (fin.payStatus === "Anticipo") {
+    return `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-brand-blue/20 text-brand-blue">Anticipo (${formatMoney(fin.creditFavor)})</span>`;
+  }
+  if (fin.payStatus === "No exigible") {
+    return `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-700/70 text-slate-300">Estimado (no exigible)</span>`;
+  }
+  return `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-500/20 text-rose-300">Pendiente</span>`;
+}
+
 function renderSpraysTable() {
   const tbody = document.getElementById("spraysTableBody");
   if (!tbody) return;
@@ -1233,15 +1341,7 @@ function renderSpraysTable() {
   tbody.innerHTML = filtered.map(sp => {
     const farm = getFarmById(sp.farmId);
     const prod = farm ? getProducerByFarmId(farm.id) : null;
-    const paid = getSprayPaidAmount(sp);
-    const saldo = getSprayPendingBalance(sp);
-
-    let payStatusBadge = `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-brand-accent">Pagado</span>`;
-    if (sp.payStatus === "Parcial") {
-      payStatusBadge = `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/20 text-amber-300">Parcial (${formatMoney(paid)})</span>`;
-    } else if (sp.payStatus === "Pendiente") {
-      payStatusBadge = `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-500/20 text-rose-300">Pendiente</span>`;
-    }
+    const fin = getSprayFinancials(sp);
 
     let sprayStatusBadge = `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-brand-accent border border-brand-accent/35">Realizada</span>`;
     if (sp.status === "Pendiente") {
@@ -1254,49 +1354,84 @@ function renderSpraysTable() {
       ? sp.products.map(pr => pr.commercialName).filter(Boolean).join(", ")
       : (sp.product || "N/A");
 
-    const pilotDepositBadge = sp.pilotPaid
-      ? `<span class="text-[10px] text-emerald-400 font-semibold">Dep. piloto OK (${formatMoney(sp.pilotPay)})</span>`
-      : `<button type="button" data-action="mark-pilot-paid" data-spray-id="${escapeHtml(sp.id)}" class="text-[10px] text-brand-blue underline hover:text-white font-semibold">Depositar ${formatMoney(sp.pilotPay)}</button>`;
+    // Regla estricta: solo órdenes Realizadas devengan pago al piloto
+    let pilotDepositHtml = "";
+    if (!fin.isRealized) {
+      pilotDepositHtml = `<span class="text-[10px] text-slate-400 italic">Estimado ${formatMoney(fin.pilotPayEstimated)} (no devengado)</span>`;
+    } else if (fin.pilotPaid) {
+      pilotDepositHtml = `
+        <span class="inline-flex items-center space-x-1 text-[10px] text-emerald-400 font-semibold">
+          <i data-lucide="circle-check" class="w-3 h-3"></i>
+          <span>Depositado (${formatMoney(fin.pilotPayAccrued)})</span>
+        </span>
+        <button type="button" data-action="unmark-pilot-paid" data-spray-id="${escapeHtml(sp.id)}" class="inline-flex items-center space-x-0.5 ml-1 text-[10px] text-slate-400 underline hover:text-rose-300" title="Revertir pago al piloto">
+          <i data-lucide="undo-2" class="w-3 h-3"></i>
+          <span>Revertir</span>
+        </button>
+      `;
+    } else {
+      pilotDepositHtml = `
+        <button type="button" data-action="mark-pilot-paid" data-spray-id="${escapeHtml(sp.id)}" class="inline-flex items-center space-x-1 text-[10px] text-brand-blue underline hover:text-white font-semibold">
+          <i data-lucide="banknote" class="w-3.5 h-3.5"></i>
+          <span>Depositar ${formatMoney(fin.pilotPayAccrued)}</span>
+        </button>
+      `;
+    }
+
+    const discountOrIvaMeta = [];
+    if (fin.discountPct > 0) discountOrIvaMeta.push(`Desc. ${fin.discountPct}%`);
+    if (fin.ivaPct > 0) discountOrIvaMeta.push(`IVA ${fin.ivaPct}%`);
 
     return `
       <tr class="hover:bg-slate-900/55 transition-colors">
-        <td class="py-3 px-3 font-semibold text-white whitespace-nowrap">
+        <td data-label="Fecha / Orden" class="py-3 px-3 font-semibold text-white md:whitespace-nowrap">
           <div>${escapeHtml(sp.date)}</div>
           <div class="text-[10px] font-mono text-brand-blue">${escapeHtml(sp.orderNumber || "")}</div>
         </td>
-        <td class="py-3 px-3">
+        <td data-label="Productor / Finca" class="py-3 px-3">
           <div class="font-bold text-white">${escapeHtml(farm ? farm.name : "Finca eliminada")}</div>
           <div class="text-[11px] text-slate-300">${escapeHtml(prod ? prod.name : "")}</div>
         </td>
-        <td class="py-3 px-3 font-bold text-brand-accent whitespace-nowrap">${formatHectares(sp.hectares)} ha</td>
-        <td class="py-3 px-3">
+        <td data-label="Hectáreas" class="py-3 px-3 font-bold text-brand-accent md:whitespace-nowrap">${formatHectares(fin.hectares)} ha</td>
+        <td data-label="Producto / Dron" class="py-3 px-3">
           <div class="text-slate-100">${escapeHtml(productsSummary)}</div>
           <div class="text-[11px] text-brand-blue">${escapeHtml(sp.drone)}</div>
         </td>
-        <td class="py-3 px-3 text-slate-200">
+        <td data-label="Piloto" class="py-3 px-3 text-slate-200">
           <div>${escapeHtml(sp.pilot)}</div>
-          <div>${pilotDepositBadge}</div>
+          <div>${pilotDepositHtml}</div>
         </td>
-        <td class="py-3 px-3">
-          <div class="font-bold text-white">${formatMoney(sp.amount)} ${saldo > 0 ? `<span class="text-[10px] text-amber-300">(Saldo ${formatMoney(saldo)})</span>` : ""}</div>
-          <div class="text-[11px] text-slate-300">${escapeHtml(sp.payMethod)} (${escapeHtml(sp.payRef || "S/R")})</div>
-          <div class="mt-0.5">${payStatusBadge}</div>
+        <td data-label="Monto / Abonos" class="py-3 px-3">
+          <div class="font-bold text-white">
+            ${formatMoney(fin.totalClient)}
+            ${fin.collectibleBalance > 0 ? `<span class="text-[10px] text-amber-300">(Saldo ${formatMoney(fin.collectibleBalance)})</span>` : ""}
+          </div>
+          ${discountOrIvaMeta.length > 0 ? `<div class="text-[10px] text-emerald-300">${discountOrIvaMeta.join(" • ")}</div>` : ""}
+          <div class="text-[11px] text-slate-300">${escapeHtml(fin.primaryMethodDisplay)}${fin.activePaymentsCount > 1 ? ` (${fin.activePaymentsCount} abonos)` : ""}</div>
+          <div class="mt-0.5">${renderPayStatusBadgeHtml(fin)}</div>
         </td>
-        <td class="py-3 px-3">
+        <td data-label="Estado / Motivo" class="py-3 px-3">
           <div>${sprayStatusBadge}</div>
-          ${sp.rescheduleDescription ? `<div class="text-[11px] text-amber-200 mt-1 max-w-[180px]">${escapeHtml(sp.rescheduleDescription)}</div>` : ""}
+          ${sp.rescheduleDescription ? `<div class="text-[11px] text-amber-200 mt-1 md:max-w-[180px]">${escapeHtml(sp.rescheduleDescription)}</div>` : ""}
         </td>
-        <td class="py-3 px-3 text-right whitespace-nowrap space-x-1">
-          ${sp.status !== "Realizada" && farm ? `<button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(sp.farmId)}" data-spray-id="${escapeHtml(sp.id)}" class="px-2 py-1.5 bg-amber-500/20 text-amber-300 hover:bg-amber-500/35 rounded-lg text-[11px] font-bold border border-amber-500/35">Reprog.</button>` : ""}
-          <button type="button" data-action="open-spray-pdf-modal" data-spray-id="${escapeHtml(sp.id)}" class="px-2.5 py-1.5 bg-brand-blue/20 text-brand-blue hover:bg-brand-blue/35 rounded-lg text-xs font-bold border border-brand-blue/35" title="Generar PDF de esta fumigación">
-            PDF
-          </button>
-          <button type="button" data-action="open-spray-modal" data-spray-id="${escapeHtml(sp.id)}" class="p-1.5 bg-slate-800 text-slate-300 hover:text-white rounded-lg border border-brand-border align-middle" title="Editar fumigación">
-            <i data-lucide="edit-2" class="w-4 h-4"></i>
-          </button>
-          <button type="button" data-action="delete-spray" data-spray-id="${escapeHtml(sp.id)}" class="p-1.5 bg-rose-500/10 text-rose-300 hover:bg-rose-500/25 rounded-lg border border-rose-500/30 align-middle" title="Eliminar fumigación">
-            <i data-lucide="trash-2" class="w-4 h-4"></i>
-          </button>
+        <td data-label="Acciones" data-cell-actions="true" class="py-3 px-3 md:text-right md:whitespace-nowrap">
+          <div class="flex flex-wrap items-center justify-start md:justify-end gap-1.5">
+            ${sp.status !== "Realizada" && farm ? `<button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(sp.farmId)}" data-spray-id="${escapeHtml(sp.id)}" class="inline-flex items-center space-x-1 px-2 py-1.5 bg-amber-500/20 text-amber-300 hover:bg-amber-500/35 rounded-lg text-[11px] font-bold border border-amber-500/35"><i data-lucide="calendar-clock" class="w-3.5 h-3.5"></i><span>Reprog.</span></button>` : ""}
+            <button type="button" data-action="open-payment-modal" data-spray-id="${escapeHtml(sp.id)}" class="inline-flex items-center space-x-1 px-2 py-1.5 bg-emerald-500/15 text-brand-accent hover:bg-emerald-500/30 rounded-lg text-[11px] font-bold border border-brand-accent/35" title="Ver o registrar abonos">
+              <i data-lucide="wallet" class="w-3.5 h-3.5"></i>
+              <span>Abonos</span>
+            </button>
+            <button type="button" data-action="open-spray-pdf-modal" data-spray-id="${escapeHtml(sp.id)}" class="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-brand-blue/20 text-brand-blue hover:bg-brand-blue/35 rounded-lg text-xs font-bold border border-brand-blue/35" title="Generar PDF de esta fumigación">
+              <i data-lucide="file-text" class="w-3.5 h-3.5"></i>
+              <span>PDF</span>
+            </button>
+            <button type="button" data-action="open-spray-modal" data-spray-id="${escapeHtml(sp.id)}" class="p-1.5 bg-slate-800 text-slate-300 hover:text-white rounded-lg border border-brand-border align-middle" title="Editar fumigación">
+              <i data-lucide="pencil" class="w-4 h-4"></i>
+            </button>
+            <button type="button" data-action="delete-spray" data-spray-id="${escapeHtml(sp.id)}" class="p-1.5 bg-rose-500/10 text-rose-300 hover:bg-rose-500/25 rounded-lg border border-rose-500/30 align-middle" title="Eliminar fumigación">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          </div>
         </td>
       </tr>
     `;
@@ -1308,9 +1443,14 @@ function renderSpraysTable() {
 function requestMarkPilotAsPaid(sprayId) {
   const sp = state.sprays.find(s => s.id === sprayId);
   if (!sp) return;
+  if (sp.status !== "Realizada") {
+    showToast("No se puede registrar depósito al piloto en una orden que aún no está Realizada.", "error");
+    return;
+  }
+  const fin = getSprayFinancials(sp);
   openConfirmModal(
-    "Confirmar depósito al piloto",
-    `¿Marcar como depositado el pago de ${formatMoney(sp.pilotPay)} al piloto ${sp.pilot} (Orden ${sp.orderNumber})?`,
+    "Confirmar depósito devengado al piloto",
+    `¿Marcar como depositado el pago devengado de ${formatMoney(fin.pilotPayAccrued)} al piloto ${sp.pilot} (Orden ${sp.orderNumber})?`,
     () => {
       sp.pilotPaid = true;
       saveState(true);
@@ -1322,11 +1462,29 @@ function requestMarkPilotAsPaid(sprayId) {
   );
 }
 
+function requestUnmarkPilotAsPaid(sprayId) {
+  const sp = state.sprays.find(s => s.id === sprayId);
+  if (!sp || !sp.pilotPaid) return;
+  const fin = getSprayFinancials(sp);
+  openConfirmModal(
+    "Revertir depósito al piloto",
+    `¿Revertir a "Pendiente de depositar" el pago de ${formatMoney(fin.pilotPayAmount)} del piloto ${sp.pilot} en la orden ${sp.orderNumber}?`,
+    () => {
+      sp.pilotPaid = false;
+      saveState(true);
+      refreshAllViews();
+      showToast("El pago al piloto volvió a estado pendiente de depositar.", "info");
+    },
+    "Sí, revertir pago",
+    true
+  );
+}
+
 function populatePilotAndDroneSelects(selectedPilot = "", selectedDrone = "") {
   const pilotSel = document.getElementById("sprayPilot");
   const droneSel = document.getElementById("sprayDrone");
-  const pilots = [...(state.config.pilots || ["Juan Diego Cobos Anguisaca"])];
-  const drones = [...(state.config.drones || ["Alfa_3"])];
+  const pilots = [...(state.config.pilots || ["Ing. Diego Vera"])];
+  const drones = [...(state.config.drones || ["DJI Agras T40 #1"])];
   if (selectedPilot && !pilots.includes(selectedPilot)) pilots.push(selectedPilot);
   if (selectedDrone && !drones.includes(selectedDrone)) drones.push(selectedDrone);
 
@@ -1339,7 +1497,7 @@ function populatePilotAndDroneSelects(selectedPilot = "", selectedDrone = "") {
 function addProductRowToSprayForm(prodItem = {}) {
   const container = document.getElementById("sprayProductsContainer");
   const row = document.createElement("div");
-  row.className = "spray-product-row grid grid-cols-1 sm:grid-cols-6 gap-2 p-2 rounded-xl bg-slate-900/90 border border-brand-border items-center";
+  row.className = "spray-product-row grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2 p-2 rounded-xl bg-slate-900/90 border border-brand-border items-center";
   row.innerHTML = `
     <input type="text" class="prod-name sm:col-span-2 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-brand-border text-white text-xs" placeholder="Nombre comercial *" value="${escapeHtml(prodItem.commercialName || "")}" required>
     <input type="text" class="prod-active px-2.5 py-1.5 rounded-lg bg-slate-950 border border-brand-border text-white text-xs" placeholder="Ing. activo (opc.)" value="${escapeHtml(prodItem.activeIngredient || "")}">
@@ -1366,6 +1524,38 @@ function removeProductRow(btn) {
   }
 }
 
+function updateSprayPricingBreakdownLabel(calc) {
+  const lbl = document.getElementById("sprayPricingBreakdown");
+  if (!lbl) return;
+  const parts = [`Subtotal: ${formatMoney(calc.subtotal)}`];
+  if (calc.discount > 0) parts.push(`Desc (${calc.discountPct}%): -${formatMoney(calc.discount)}`);
+  if (calc.iva > 0) parts.push(`IVA (${calc.ivaPct}%): +${formatMoney(calc.iva)}`);
+  parts.push(`Total: ${formatMoney(calc.totalClient)}`);
+  lbl.textContent = parts.join(" • ");
+}
+
+function onSprayPricingChanged() {
+  const ha = Math.max(0, parseFloat(document.getElementById("sprayHectares").value) || 0);
+  const rawRate = document.getElementById("sprayUnitRateHa").value;
+  const unitRate = rawRate === "" ? state.config.clientRatePerHa : Math.max(0, parseFloat(rawRate) || 0);
+  const disc = Math.min(100, Math.max(0, parseFloat(document.getElementById("sprayDiscountPct").value) || 0));
+  const iva = Math.min(100, Math.max(0, parseFloat(document.getElementById("sprayIvaPct").value) || 0));
+
+  const calc = computeSprayFinancials({
+    pricingMode: "v5",
+    status: "Realizada",
+    hectares: ha,
+    unitRateHa: unitRate,
+    discountPct: disc,
+    ivaPct: iva,
+    payments: []
+  }, state.config);
+
+  document.getElementById("sprayAmount").value = calc.totalClient.toFixed(2);
+  document.getElementById("sprayPilotPay").value = calc.pilotPayAmount.toFixed(2);
+  updateSprayPricingBreakdownLabel(calc);
+}
+
 function openSprayModal(sprayId = null) {
   const farms = getAllFarms();
   if (farms.length === 0) {
@@ -1381,17 +1571,21 @@ function openSprayModal(sprayId = null) {
 
   const productsContainer = document.getElementById("sprayProductsContainer");
   productsContainer.innerHTML = "";
+  const existingNotice = document.getElementById("sprayExistingPaymentsNotice");
+  const initialPaySec = document.getElementById("sprayInitialPaymentSection");
 
   if (sprayId) {
     const sp = state.sprays.find(s => s.id === sprayId);
     if (!sp) return;
+    const fin = getSprayFinancials(sp);
+
     document.getElementById("sprayModalTitle").textContent = "Editar Fumigación";
     document.getElementById("sprayEditId").value = sp.id;
     select.value = sp.farmId;
     document.getElementById("sprayOrderNumber").value = sp.orderNumber || "";
     document.getElementById("sprayStatus").value = sp.status || "Realizada";
     document.getElementById("sprayDate").value = sp.date;
-    document.getElementById("sprayHectares").value = formatHectares(sp.hectares);
+    document.getElementById("sprayHectares").value = fin.hectares;
     populatePilotAndDroneSelects(sp.pilot, sp.drone);
 
     const prods = Array.isArray(sp.products) && sp.products.length > 0
@@ -1400,14 +1594,27 @@ function openSprayModal(sprayId = null) {
     prods.forEach(pr => addProductRowToSprayForm(pr));
 
     document.getElementById("sprayNotes").value = sp.notes || "";
-    document.getElementById("sprayAmount").value = roundMoney(sp.amount).toFixed(2);
-    document.getElementById("sprayPilotPay").value = roundMoney(sp.pilotPay).toFixed(2);
+    document.getElementById("sprayUnitRateHa").value = fin.unitRateHa.toFixed(2);
+    document.getElementById("sprayDiscountPct").value = fin.discountPct;
+    document.getElementById("sprayIvaPct").value = fin.ivaPct;
+    document.getElementById("sprayAmount").value = fin.totalClient.toFixed(2);
+    document.getElementById("sprayPilotPay").value = fin.pilotPayAmount.toFixed(2);
     document.getElementById("sprayPilotPaid").value = sp.pilotPaid ? "true" : "false";
-    document.getElementById("sprayPayMethod").value = sp.payMethod;
-    document.getElementById("sprayPayRef").value = sp.payRef || "";
-    document.getElementById("sprayPayBank").value = sp.payBank || "";
-    document.getElementById("sprayPayStatus").value = sp.payStatus;
-    document.getElementById("sprayAmountPaid").value = roundMoney(sp.amountPaid || 0).toFixed(2);
+    updateSprayPricingBreakdownLabel(fin);
+
+    if (fin.payments && fin.payments.length > 0) {
+      existingNotice.innerHTML = `Esta orden ya cuenta con <strong>${fin.activePaymentsCount} abono(s) vigente(s) (${formatMoney(fin.paidAmount)})</strong> en su libro auditable. Los abonos existentes se conservarán intactos al guardar; para agregar o anular pagos usa el botón <strong>Abonos</strong>.`;
+      existingNotice.classList.remove("hidden");
+      initialPaySec.classList.add("hidden");
+    } else {
+      existingNotice.classList.add("hidden");
+      initialPaySec.classList.remove("hidden");
+      document.getElementById("sprayPayMethod").value = sp.payMethod || "Transferencia";
+      document.getElementById("sprayPayRef").value = sp.payRef || "";
+      document.getElementById("sprayPayBank").value = sp.payBank || "";
+      document.getElementById("sprayPayStatus").value = "Pendiente";
+      document.getElementById("sprayAmountPaid").value = "0.00";
+    }
   } else {
     document.getElementById("sprayForm").reset();
     document.getElementById("sprayModalTitle").textContent = "Registrar Nueva Fumigación";
@@ -1416,6 +1623,12 @@ function openSprayModal(sprayId = null) {
     const todayStr = getGuayaquilTodayStr();
     document.getElementById("sprayDate").value = todayStr;
     document.getElementById("sprayOrderNumber").value = generateNextOrderNumber(todayStr);
+    document.getElementById("sprayUnitRateHa").value = (state.config.clientRatePerHa ?? 15).toFixed(2);
+    document.getElementById("sprayDiscountPct").value = "0";
+    document.getElementById("sprayIvaPct").value = String(state.config.defaultIvaPct ?? 0);
+    document.getElementById("sprayPayStatus").value = "Pendiente";
+    existingNotice.classList.add("hidden");
+    initialPaySec.classList.remove("hidden");
     populatePilotAndDroneSelects();
     addProductRowToSprayForm({});
     onSprayFarmSelected();
@@ -1433,25 +1646,9 @@ function onSprayFarmSelected() {
   const farmId = document.getElementById("sprayFarmSelect").value;
   const farm = getFarmById(farmId);
   if (farm) {
-    const ha = roundHectares(farm.hectares);
-    const clientRate = Number.isFinite(state.config.clientRatePerHa) ? state.config.clientRatePerHa : 15;
-    const pilotRate = Number.isFinite(state.config.pilotRatePerHa) ? state.config.pilotRatePerHa : 4.5;
-    document.getElementById("sprayHectares").value = formatHectares(ha);
-    document.getElementById("sprayAmount").value = roundMoney(ha * clientRate).toFixed(2);
-    document.getElementById("sprayPilotPay").value = roundMoney(ha * pilotRate).toFixed(2);
+    document.getElementById("sprayHectares").value = roundHectares(farm.hectares);
+    onSprayPricingChanged();
   }
-}
-
-/**
- * Corrección de auditoría: al cambiar hectáreas se recalculan tanto el monto
- * sugerido al cliente como el pago al piloto de forma consistente con Fumigados del Día.
- */
-function onSprayHectaresChanged() {
-  const ha = roundHectares(Math.max(0, parseFloat(document.getElementById("sprayHectares").value) || 0));
-  const clientRate = Number.isFinite(state.config.clientRatePerHa) ? state.config.clientRatePerHa : 15;
-  const pilotRate = Number.isFinite(state.config.pilotRatePerHa) ? state.config.pilotRatePerHa : 4.5;
-  document.getElementById("sprayAmount").value = roundMoney(ha * clientRate).toFixed(2);
-  document.getElementById("sprayPilotPay").value = roundMoney(ha * pilotRate).toFixed(2);
 }
 
 function togglePaymentRefFields() {
@@ -1486,16 +1683,16 @@ function saveSprayForm(e) {
   const orderNumber = document.getElementById("sprayOrderNumber").value.trim() || generateNextOrderNumber(date);
   const status = document.getElementById("sprayStatus").value;
   const hectares = parseFloat(document.getElementById("sprayHectares").value);
+  const unitRateRaw = document.getElementById("sprayUnitRateHa").value;
+  const unitRateHa = unitRateRaw === "" ? state.config.clientRatePerHa : parseFloat(unitRateRaw);
+  const discountPct = parseFloat(document.getElementById("sprayDiscountPct").value || "0");
+  const ivaPct = parseFloat(document.getElementById("sprayIvaPct").value || "0");
   const drone = document.getElementById("sprayDrone").value;
   const pilot = document.getElementById("sprayPilot").value;
   const notes = document.getElementById("sprayNotes").value.trim();
   const amount = parseFloat(document.getElementById("sprayAmount").value);
   const pilotPayRaw = parseFloat(document.getElementById("sprayPilotPay").value);
-  const pilotPaid = document.getElementById("sprayPilotPaid").value === "true";
-  const payMethod = document.getElementById("sprayPayMethod").value;
-  const payRef = document.getElementById("sprayPayRef").value.trim();
-  const payBank = payMethod === "Efectivo" ? "" : document.getElementById("sprayPayBank").value.trim();
-  let payStatus = document.getElementById("sprayPayStatus").value;
+  let pilotPaid = document.getElementById("sprayPilotPaid").value === "true";
 
   if (!getFarmById(farmId)) {
     showToast("Selecciona una finca válida.", "error");
@@ -1509,32 +1706,28 @@ function saveSprayForm(e) {
     showToast("Las hectáreas deben ser mayores a 0.", "error");
     return;
   }
+  if (!Number.isFinite(unitRateHa) || unitRateHa < 0) {
+    showToast("La tarifa por hectárea debe ser mayor o igual a $0.00.", "error");
+    return;
+  }
+  if (!Number.isFinite(discountPct) || discountPct < 0 || discountPct > 100) {
+    showToast("El descuento debe estar entre 0% y 100%.", "error");
+    return;
+  }
+  if (!Number.isFinite(ivaPct) || ivaPct < 0 || ivaPct > 100) {
+    showToast("El IVA debe estar entre 0% y 100%.", "error");
+    return;
+  }
   if (!Number.isFinite(amount) || amount < 0) {
     showToast("El monto total del cliente debe ser mayor o igual a $0.00.", "error");
     return;
   }
-  const pilotPay = Number.isFinite(pilotPayRaw) && pilotPayRaw >= 0 ? roundMoney(pilotPayRaw) : 0;
-
-  let amountPaid = 0;
-  if (payStatus === "Pagado") {
-    amountPaid = roundMoney(amount);
-  } else if (payStatus === "Parcial") {
-    const rawPaid = parseFloat(document.getElementById("sprayAmountPaid").value);
-    if (!Number.isFinite(rawPaid) || rawPaid <= 0) {
-      showToast("En pago parcial, el abono debe ser mayor a $0.00.", "error");
-      return;
-    }
-    if (rawPaid > amount) {
-      showToast(`El monto abonado (${formatMoney(rawPaid)}) no puede superar el total (${formatMoney(amount)}).`, "error");
-      return;
-    }
-    if (roundMoney(rawPaid) === roundMoney(amount)) {
-      payStatus = "Pagado";
-      amountPaid = roundMoney(amount);
-    } else {
-      amountPaid = roundMoney(rawPaid);
-    }
+  if (status !== "Realizada" && pilotPaid) {
+    showToast("No puedes marcar como depositado el pago al piloto en una orden que aún no está Realizada.", "error");
+    return;
   }
+
+  const pilotPay = Number.isFinite(pilotPayRaw) && pilotPayRaw >= 0 ? roundMoney(pilotPayRaw) : 0;
 
   const products = [];
   document.querySelectorAll("#sprayProductsContainer .spray-product-row").forEach(row => {
@@ -1555,57 +1748,144 @@ function saveSprayForm(e) {
     return;
   }
 
-  const product = products.map(p => p.commercialName).join(", ");
-  let previousFarmId = null;
-
-  if (editId) {
-    const sp = state.sprays.find(s => s.id === editId);
-    if (sp) {
-      previousFarmId = sp.farmId;
-      Object.assign(sp, {
-        orderNumber,
-        status,
-        farmId,
-        date,
-        hectares: roundHectares(hectares),
-        product,
-        products,
-        drone,
-        pilot,
-        pilotPay,
-        pilotPaid,
-        notes,
-        amount: roundMoney(amount),
-        amountPaid,
-        payMethod,
-        payRef,
-        payBank,
-        payStatus
-      });
+  const existingSpray = editId ? state.sprays.find(s => s.id === editId) : null;
+  if (existingSpray) {
+    const guard = canTransitionSprayStatus(existingSpray, status, state.config);
+    if (!guard.allowed) {
+      showToast(guard.reason, "error");
+      return;
     }
+    if (guard.requiresConfirm) {
+      openConfirmModal(
+        "Confirmar cambio de estado con abonos",
+        guard.message,
+        () => commitSprayFormSave({
+          existingSpray, farmId, date, orderNumber, status, hectares,
+          unitRateHa, discountPct, ivaPct, drone, pilot, notes, amount, pilotPay, pilotPaid, products
+        }),
+        "Sí, conservar anticipo y cambiar",
+        false
+      );
+      return;
+    }
+  }
+
+  commitSprayFormSave({
+    existingSpray, farmId, date, orderNumber, status, hectares,
+    unitRateHa, discountPct, ivaPct, drone, pilot, notes, amount, pilotPay, pilotPaid, products
+  });
+}
+
+function commitSprayFormSave(payload) {
+  const {
+    existingSpray, farmId, date, orderNumber, status, hectares,
+    unitRateHa, discountPct, ivaPct, drone, pilot, notes, amount, pilotPay, pilotPaid, products
+  } = payload;
+
+  const hasExistingPayments = Boolean(existingSpray && Array.isArray(existingSpray.payments) && existingSpray.payments.length > 0);
+  let payments = hasExistingPayments ? existingSpray.payments : [];
+  let payMethod = existingSpray ? existingSpray.payMethod : document.getElementById("sprayPayMethod").value;
+  let payRef = existingSpray ? existingSpray.payRef : document.getElementById("sprayPayRef").value.trim();
+  let payBank = existingSpray ? existingSpray.payBank : (payMethod === "Efectivo" ? "" : document.getElementById("sprayPayBank").value.trim());
+
+  if (!hasExistingPayments) {
+    payMethod = document.getElementById("sprayPayMethod").value;
+    payRef = document.getElementById("sprayPayRef").value.trim();
+    payBank = payMethod === "Efectivo" ? "" : document.getElementById("sprayPayBank").value.trim();
+    const initialStatus = document.getElementById("sprayPayStatus").value;
+    let initialCents = 0;
+    if (initialStatus === "Pagado") {
+      initialCents = toSafeCents(amount);
+    } else if (initialStatus === "Parcial") {
+      const rawPaid = parseFloat(document.getElementById("sprayAmountPaid").value);
+      if (!Number.isFinite(rawPaid) || rawPaid <= 0) {
+        showToast("En pago parcial o anticipo, el monto abonado debe ser mayor a $0.00.", "error");
+        return;
+      }
+      initialCents = toSafeCents(rawPaid);
+    }
+    if (initialCents > 0) {
+      payments = [normalizePaymentMovement({
+        id: generateUid("pay"),
+        date,
+        amountCents: initialCents,
+        method: payMethod,
+        ref: payRef,
+        bank: payBank,
+        note: "Pago inicial al registrar la orden",
+        voided: false,
+        createdAt: new Date().toISOString()
+      }, 0, date)];
+    }
+  }
+
+  const formulaCalc = computeSprayFinancials({
+    pricingMode: "v5",
+    status,
+    hectares: roundHectares(hectares),
+    unitRateHa: roundMoney(unitRateHa),
+    discountPct: roundMoney(discountPct),
+    ivaPct: roundMoney(ivaPct),
+    payments
+  }, state.config);
+
+  const manualOverride = toSafeCents(amount) !== formulaCalc.totalClientCents
+    ? roundMoney(amount)
+    : undefined;
+
+  const updatedFields = {
+    orderNumber,
+    status,
+    farmId,
+    date,
+    hectares: roundHectares(hectares),
+    pricingMode: "v5",
+    unitRateHa: roundMoney(unitRateHa),
+    discountPct: roundMoney(discountPct),
+    ivaPct: roundMoney(ivaPct),
+    manualTotalOverride: manualOverride,
+    payments,
+    product: products.map(p => p.commercialName).join(", "),
+    products,
+    drone,
+    pilot,
+    pilotPay,
+    pilotPaid: status === "Realizada" ? pilotPaid : false,
+    notes,
+    payMethod,
+    payRef,
+    payBank
+  };
+
+  let previousFarmId = null;
+  if (existingSpray) {
+    previousFarmId = existingSpray.farmId;
+    Object.assign(existingSpray, updatedFields);
+    if (manualOverride === undefined) delete existingSpray.manualTotalOverride;
+    const fin = computeSprayFinancials(existingSpray, state.config);
+    existingSpray.subtotal = fin.subtotal;
+    existingSpray.discount = fin.discount;
+    existingSpray.taxableBase = fin.taxableBase;
+    existingSpray.iva = fin.iva;
+    existingSpray.amount = fin.totalClient;
+    existingSpray.amountPaid = fin.paidAmount;
+    existingSpray.payStatus = fin.payStatus;
   } else {
-    state.sprays.unshift({
+    const newSp = {
       id: generateUid("sp"),
-      orderNumber,
-      status,
       rescheduleDescription: "",
-      farmId,
-      date,
-      hectares: roundHectares(hectares),
-      product,
-      products,
-      drone,
-      pilot,
-      pilotPay,
-      pilotPaid,
-      notes,
-      amount: roundMoney(amount),
-      amountPaid,
-      payMethod,
-      payRef,
-      payBank,
-      payStatus
-    });
+      ...updatedFields
+    };
+    if (manualOverride === undefined) delete newSp.manualTotalOverride;
+    const fin = computeSprayFinancials(newSp, state.config);
+    newSp.subtotal = fin.subtotal;
+    newSp.discount = fin.discount;
+    newSp.taxableBase = fin.taxableBase;
+    newSp.iva = fin.iva;
+    newSp.amount = fin.totalClient;
+    newSp.amountPaid = fin.paidAmount;
+    newSp.payStatus = fin.payStatus;
+    state.sprays.unshift(newSp);
   }
 
   syncFarmLastSprayFromHistory(farmId);
@@ -1666,7 +1946,7 @@ function renderCalendar() {
 
   let gridHtml = "";
   for (let i = 0; i < firstDayIdx; i++) {
-    gridHtml += `<div class="p-2 bg-slate-950/30 rounded-xl border border-brand-border/20 opacity-40"></div>`;
+    gridHtml += `<div class="p-1 sm:p-2 bg-slate-950/30 rounded-lg sm:rounded-xl border border-brand-border/20 opacity-40 min-w-0"></div>`;
   }
 
   for (let day = 1; day <= totalDays; day++) {
@@ -1677,20 +1957,20 @@ function renderCalendar() {
     schedules.forEach(({ farm, sched }) => {
       if (sched.hasReschedule) {
         if (sched.rescheduledDate === dateStr) {
-          itemsHtml += `<button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(farm.id)}" class="w-full text-left cursor-pointer text-[10px] px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-200 border border-amber-400/50 font-bold truncate hover:bg-amber-500/35" title="Reprogramada: ${escapeHtml(farm.name)} (${escapeHtml(sched.rescheduleDescription)})">Reprog: ${escapeHtml(farm.name)}</button>`;
+          itemsHtml += `<button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(farm.id)}" class="w-full text-left cursor-pointer text-[9px] sm:text-[10px] leading-tight px-1 sm:px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-200 border border-amber-400/50 font-bold truncate hover:bg-amber-500/35" title="Reprogramada: ${escapeHtml(farm.name)} (${escapeHtml(sched.rescheduleDescription)})">Reprog: ${escapeHtml(farm.name)}</button>`;
         }
       } else if (sched.baseDateStr === dateStr) {
-        itemsHtml += `<button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(farm.id)}" class="w-full text-left cursor-pointer text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-brand-accent border border-brand-accent/40 font-semibold truncate hover:bg-emerald-500/30" title="Fecha Base: ${escapeHtml(farm.name)}">${escapeHtml(farm.name)}</button>`;
+        itemsHtml += `<button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(farm.id)}" class="w-full text-left cursor-pointer text-[9px] sm:text-[10px] leading-tight px-1 sm:px-1.5 py-0.5 rounded bg-emerald-500/20 text-brand-accent border border-brand-accent/40 font-semibold truncate hover:bg-emerald-500/30" title="Fecha Base: ${escapeHtml(farm.name)}">${escapeHtml(farm.name)}</button>`;
       }
     });
 
     gridHtml += `
-      <div class="p-2 rounded-xl border min-h-[78px] flex flex-col justify-start ${isToday ? "bg-brand-accent/15 border-brand-accent/65 shadow-inner" : "bg-slate-900/55 border-brand-border/60"}">
-        <div class="flex items-center justify-between mb-1">
-          <span class="text-xs font-bold ${isToday ? "text-brand-accent" : "text-white"}">${day}</span>
-          ${isToday ? '<span class="text-[9px] font-extrabold text-black bg-brand-accent px-1.5 rounded">HOY</span>' : ""}
+      <div class="p-1 sm:p-2 rounded-lg sm:rounded-xl border min-h-[58px] sm:min-h-[78px] min-w-0 overflow-hidden flex flex-col justify-start ${isToday ? "bg-brand-accent/15 border-brand-accent/65 shadow-inner" : "bg-slate-900/55 border-brand-border/60"}">
+        <div class="flex items-center justify-between gap-0.5 mb-1">
+          <span class="text-[11px] sm:text-xs font-bold ${isToday ? "text-brand-accent" : "text-white"}">${day}</span>
+          ${isToday ? '<span class="hidden sm:inline-block text-[9px] font-extrabold text-black bg-brand-accent px-1.5 rounded">HOY</span><span class="sm:hidden w-1.5 h-1.5 rounded-full bg-brand-accent shrink-0" title="Hoy"></span>' : ""}
         </div>
-        <div class="space-y-1">${itemsHtml}</div>
+        <div class="space-y-1 min-w-0">${itemsHtml}</div>
       </div>
     `;
   }
@@ -1711,13 +1991,16 @@ function renderCalendar() {
             <div class="text-xs font-bold text-white truncate">${formatDisplayDate(sched.effectiveDateStr)} • ${escapeHtml(farm.name)}</div>
             <div class="text-[11px] text-slate-300 truncate">${escapeHtml(prod ? prod.name : "")} • ${sched.hasReschedule ? `Reprogramada: ${escapeHtml(sched.rescheduleDescription)}` : `Base (+${sched.daysToAdd}d)`}</div>
           </div>
-          <button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(farm.id)}" class="px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/35 text-[11px] font-bold shrink-0">
-            Reprog.
+          <button type="button" data-action="open-reschedule-modal" data-farm-id="${escapeHtml(farm.id)}" class="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/35 text-[11px] font-bold shrink-0">
+            <i data-lucide="calendar-clock" class="w-3.5 h-3.5"></i>
+            <span>Reprog.</span>
           </button>
         </div>
       `).join("");
     }
   }
+
+  safeRefreshIcons();
 }
 
 function changeCalendarMonth(offset) {
@@ -1740,7 +2023,7 @@ function resetCalendarToToday() {
 }
 
 // ==========================================================================
-// 7. COBROS Y CARTERA (SOLO FUMIGACIONES REALIZADAS EXIGIBLES)
+// 7. COBROS, CARTERA Y LIBRO AUDITABLE DE ABONOS MÚLTIPLES
 // ==========================================================================
 function renderBillingTable() {
   const tbody = document.getElementById("billingTableBody");
@@ -1750,47 +2033,38 @@ function renderBillingTable() {
   const filterEl = document.getElementById("filterBillingStatusSelect");
   const filterVal = filterEl ? filterEl.value : "ALL";
 
-  let collectedTransfer = 0;
-  let collectedCheque = 0;
-  let collectedEfectivo = 0;
-  let totalPorCobrar = 0;
-
-  state.sprays.forEach(sp => {
-    if (!isCollectibleSpray(sp)) return;
-    const paid = getSprayPaidAmount(sp);
-    const saldo = getSprayPendingBalance(sp);
-    totalPorCobrar = roundMoney(totalPorCobrar + saldo);
-
-    if (sp.payMethod === "Transferencia") collectedTransfer = roundMoney(collectedTransfer + paid);
-    else if (sp.payMethod === "Cheque") collectedCheque = roundMoney(collectedCheque + paid);
-    else collectedEfectivo = roundMoney(collectedEfectivo + paid);
-  });
+  const summary = computePortfolioSummary(state.sprays, state.config);
+  const totalCreditsAndAdvances = roundMoney(summary.creditFavorTotal + summary.advancesOnPendingTotal);
 
   summaryEl.innerHTML = `
     <div class="glass-card p-4 rounded-2xl border border-brand-blue/35">
       <div class="text-[11px] text-slate-300 uppercase font-bold">Transferencias (Cobrado)</div>
-      <div class="text-2xl font-black text-brand-blue mt-1">${formatMoney(collectedTransfer)}</div>
+      <div class="text-2xl font-black text-brand-blue mt-1">${formatMoney(summary.collectedByMethod.Transferencia)}</div>
     </div>
     <div class="glass-card p-4 rounded-2xl border border-amber-500/35">
       <div class="text-[11px] text-slate-300 uppercase font-bold">Cheques (Cobrado)</div>
-      <div class="text-2xl font-black text-amber-400 mt-1">${formatMoney(collectedCheque)}</div>
+      <div class="text-2xl font-black text-amber-400 mt-1">${formatMoney(summary.collectedByMethod.Cheque)}</div>
     </div>
     <div class="glass-card p-4 rounded-2xl border border-brand-accent/35">
       <div class="text-[11px] text-slate-300 uppercase font-bold">Efectivo (Cobrado)</div>
-      <div class="text-2xl font-black text-brand-accent mt-1">${formatMoney(collectedEfectivo)}</div>
+      <div class="text-2xl font-black text-brand-accent mt-1">${formatMoney(summary.collectedByMethod.Efectivo)}</div>
     </div>
     <div class="glass-card p-4 rounded-2xl border border-rose-500/35">
-      <div class="text-[11px] text-slate-300 uppercase font-bold">Total Por Cobrar</div>
-      <div class="text-2xl font-black text-rose-400 mt-1">${formatMoney(totalPorCobrar)}</div>
+      <div class="text-[11px] text-slate-300 uppercase font-bold">Por Cobrar (Devengado)</div>
+      <div class="text-2xl font-black text-rose-400 mt-1">${formatMoney(summary.collectibleTotal)}</div>
+      <div class="text-[10px] text-slate-300 mt-0.5">
+        ${summary.billedEstimated > 0 ? `Est. no exigible: ${formatMoney(summary.billedEstimated)}` : "Sin órdenes estimadas"}
+        ${totalCreditsAndAdvances > 0 ? ` • A favor/Anticipos: ${formatMoney(totalCreditsAndAdvances)}` : ""}
+      </div>
     </div>
   `;
 
   const visibleSprays = state.sprays
     .filter(sp => {
-      const collectible = isCollectibleSpray(sp);
-      const saldo = getSprayPendingBalance(sp);
-      if (filterVal === "OPEN") return collectible && saldo > 0;
-      if (filterVal === "PAID") return collectible && saldo === 0;
+      const fin = getSprayFinancials(sp);
+      if (filterVal === "OPEN") return fin.isRealized && fin.collectibleBalance > 0;
+      if (filterVal === "PAID") return fin.isRealized && fin.payStatus === "Pagado";
+      if (filterVal === "CREDIT") return fin.creditFavor > 0;
       return true;
     })
     .slice()
@@ -1805,27 +2079,15 @@ function renderBillingTable() {
   tbody.innerHTML = visibleSprays.map(sp => {
     const farm = getFarmById(sp.farmId);
     const prod = farm ? getProducerByFarmId(farm.id) : null;
-    const collectible = isCollectibleSpray(sp);
-    const amt = roundMoney(sp.amount);
-    const paid = getSprayPaidAmount(sp);
-    const saldo = collectible ? getSprayPendingBalance(sp) : 0;
+    const fin = getSprayFinancials(sp);
 
-    let payBadge = `<span class="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-brand-accent font-bold text-xs">Pagado</span>`;
-    if (!collectible) {
-      payBadge = `<span class="px-2.5 py-1 rounded-lg bg-slate-700/70 text-slate-300 font-bold text-xs">No exigible (${escapeHtml(sp.status)})</span>`;
-    } else if (sp.payStatus === "Parcial") {
-      payBadge = `<span class="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 font-bold text-xs">Parcial (${formatMoney(paid)})</span>`;
-    } else if (sp.payStatus === "Pendiente") {
-      payBadge = `<span class="px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 font-bold text-xs">Pendiente</span>`;
-    }
-
-    const waBtn = saldo > 0
+    const waBtn = fin.collectibleBalance > 0
       ? renderWhatsAppButtonHtml(prod, "payment", {
           nombre: prod ? prod.name : "",
           finca: farm ? farm.name : "",
           fecha: formatDisplayDate(sp.date, true),
-          saldo: formatMoney(saldo),
-          monto: formatMoney(amt)
+          saldo: formatMoney(fin.collectibleBalance),
+          monto: formatMoney(fin.totalClient)
         }, "Cobrar WA")
       : renderWhatsAppButtonHtml(prod, "reminder", {
           nombre: prod ? prod.name : "",
@@ -1835,32 +2097,50 @@ function renderBillingTable() {
             : "próxima fecha"
         }, "WhatsApp");
 
+    let balanceSubHtml = `<div class="text-[11px] text-emerald-400">Liquidado</div>`;
+    if (!fin.isRealized) {
+      balanceSubHtml = fin.paidAmount > 0
+        ? `<div class="text-[11px] text-brand-blue font-semibold">Anticipo: ${formatMoney(fin.paidAmount)}</div>`
+        : `<div class="text-[11px] text-slate-400">Estimado (${escapeHtml(sp.status)})</div>`;
+    } else if (fin.collectibleBalance > 0) {
+      balanceSubHtml = `<div class="text-[11px] text-amber-400 font-semibold">Saldo: ${formatMoney(fin.collectibleBalance)}</div>`;
+    } else if (fin.creditFavor > 0) {
+      balanceSubHtml = `<div class="text-[11px] text-brand-blue font-semibold">A favor: +${formatMoney(fin.creditFavor)}</div>`;
+    }
+
+    const activePaymentsDesc = fin.activePaymentsCount === 0
+      ? `<span class="text-slate-400">Sin abonos</span>`
+      : `<div><strong class="text-brand-accent">${formatMoney(fin.paidAmount)}</strong> (${fin.activePaymentsCount} ${fin.activePaymentsCount === 1 ? "abono" : "abonos"})</div>
+         <div class="text-[11px] text-brand-blue">${escapeHtml(fin.primaryMethodDisplay)}${fin.lastActivePayment && fin.lastActivePayment.ref ? ` • Ref: ${escapeHtml(fin.lastActivePayment.ref)}` : ""}</div>`;
+
     return `
       <tr class="hover:bg-slate-900/55 transition-colors">
-        <td class="py-3 px-3 font-medium text-white whitespace-nowrap">
+        <td data-label="Fecha / Orden" class="py-3 px-3 font-medium text-white md:whitespace-nowrap">
           <div>${escapeHtml(sp.date)}</div>
           <div class="text-[10px] font-mono text-brand-blue">${escapeHtml(sp.orderNumber || "")}</div>
         </td>
-        <td class="py-3 px-3 font-bold text-white">${escapeHtml(prod ? prod.name : "N/A")}</td>
-        <td class="py-3 px-3 text-slate-300">
+        <td data-label="Productor" class="py-3 px-3 font-bold text-white">${escapeHtml(prod ? prod.name : "N/A")}</td>
+        <td data-label="Finca" class="py-3 px-3 text-slate-300">
           <div>${escapeHtml(farm ? farm.name : "N/A")}</div>
-          ${!collectible ? `<span class="text-[10px] text-amber-300 font-semibold">${escapeHtml(sp.status)}</span>` : ""}
+          ${!fin.isRealized ? `<span class="text-[10px] text-amber-300 font-semibold">${escapeHtml(sp.status)}</span>` : ""}
         </td>
-        <td class="py-3 px-3">
-          <div class="font-bold text-white">${formatMoney(amt)}</div>
-          ${!collectible
-            ? `<div class="text-[11px] text-slate-400">Aún no ejecutada</div>`
-            : (saldo > 0 ? `<div class="text-[11px] text-amber-400 font-semibold">Saldo: ${formatMoney(saldo)}</div>` : `<div class="text-[11px] text-emerald-400">Liquidado</div>`)}
+        <td data-label="Total / Saldo" class="py-3 px-3">
+          <div class="font-bold text-white">${formatMoney(fin.totalClient)}</div>
+          ${balanceSubHtml}
         </td>
-        <td class="py-3 px-3 text-xs text-slate-300">
-          <div class="text-brand-blue font-semibold">${escapeHtml(sp.payMethod)}</div>
-          <div>Ref: <strong>${escapeHtml(sp.payRef || "S/R")}</strong>${sp.payBank ? " • " + escapeHtml(sp.payBank) : ""}</div>
+        <td data-label="Abonos / Métodos" class="py-3 px-3 text-xs text-slate-300">
+          ${activePaymentsDesc}
         </td>
-        <td class="py-3 px-3">${payBadge}</td>
-        <td class="py-3 px-3 text-right whitespace-nowrap space-x-1">
-          ${saldo > 0 ? `<button type="button" data-action="open-payment-modal" data-spray-id="${escapeHtml(sp.id)}" class="px-2.5 py-1.5 bg-brand-blue/20 text-brand-blue border border-brand-blue/40 font-bold rounded-lg text-xs hover:bg-brand-blue/35">Abonar</button>` : ""}
-          ${saldo > 0 ? `<button type="button" data-action="mark-spray-paid" data-spray-id="${escapeHtml(sp.id)}" class="px-2.5 py-1.5 bg-brand-accent text-black font-bold rounded-lg text-xs hover:bg-emerald-300">Pagado</button>` : ""}
-          ${waBtn}
+        <td data-label="Estado" class="py-3 px-3">${renderPayStatusBadgeHtml(fin)}</td>
+        <td data-label="Acciones" data-cell-actions="true" class="py-3 px-3 md:text-right md:whitespace-nowrap">
+          <div class="flex flex-wrap items-center justify-start md:justify-end gap-1.5">
+            <button type="button" data-action="open-payment-modal" data-spray-id="${escapeHtml(sp.id)}" class="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-brand-blue/20 text-brand-blue border border-brand-blue/40 font-bold rounded-lg text-xs hover:bg-brand-blue/35">
+              <i data-lucide="wallet" class="w-3.5 h-3.5"></i>
+              <span>${fin.collectibleBalance > 0 ? "Abonar" : "Historial / Abono"}</span>
+            </button>
+            ${fin.isRealized && fin.collectibleBalance > 0 ? `<button type="button" data-action="mark-spray-paid" data-spray-id="${escapeHtml(sp.id)}" class="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-brand-accent text-black font-bold rounded-lg text-xs hover:bg-emerald-300"><i data-lucide="circle-check" class="w-3.5 h-3.5"></i><span>Liquidar</span></button>` : ""}
+            ${waBtn}
+          </div>
         </td>
       </tr>
     `;
@@ -1869,33 +2149,129 @@ function renderBillingTable() {
   safeRefreshIcons();
 }
 
+function toggleQuickPaymentBankField() {
+  const method = document.getElementById("paymentMethod").value;
+  const bankWrap = document.getElementById("paymentBankGroupModal");
+  if (bankWrap) {
+    bankWrap.classList.toggle("hidden", method === "Efectivo");
+  }
+}
+
+function renderPaymentHistoryInsideModal(sp, fin) {
+  const listEl = document.getElementById("paymentHistoryList");
+  if (!listEl) return;
+
+  const movements = Array.isArray(sp.payments) ? sp.payments : [];
+  if (movements.length === 0) {
+    listEl.innerHTML = `<p class="text-slate-400 italic py-1">Aún no hay abonos registrados en esta orden.</p>`;
+    return;
+  }
+
+  listEl.innerHTML = movements.map(mov => {
+    const isVoid = Boolean(mov.voided);
+    return `
+      <div class="p-2.5 rounded-xl border ${isVoid ? "bg-rose-950/20 border-rose-500/30 opacity-65" : "bg-slate-900/90 border-brand-border"} flex items-center justify-between gap-2">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="font-bold ${isVoid ? "line-through text-slate-400" : "text-white"}">${formatMoney(mov.amount)}</span>
+            <span class="px-1.5 py-0.5 rounded bg-slate-800 text-brand-blue font-semibold text-[10px]">${escapeHtml(mov.method)}</span>
+            <span class="text-[11px] text-slate-400">${escapeHtml(mov.date)}</span>
+            ${mov.migratedFromV4 ? `<span class="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">Migrado V4</span>` : ""}
+            ${isVoid ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold">Anulado</span>` : ""}
+          </div>
+          <div class="text-[11px] text-slate-300 truncate">
+            ${mov.ref ? `Ref: <strong>${escapeHtml(mov.ref)}</strong>` : "Sin ref."}${mov.bank ? ` • ${escapeHtml(mov.bank)}` : ""}${mov.note ? ` • ${escapeHtml(mov.note)}` : ""}
+          </div>
+        </div>
+        ${!isVoid ? `
+          <button type="button" data-action="void-payment" data-spray-id="${escapeHtml(sp.id)}" data-payment-id="${escapeHtml(mov.id)}" class="inline-flex items-center space-x-1 px-2 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 text-[10px] font-bold shrink-0" title="Anular este abono conservando auditoría">
+            <i data-lucide="ban" class="w-3 h-3"></i>
+            <span>Anular</span>
+          </button>
+        ` : ""}
+      </div>
+    `;
+  }).join("");
+
+  safeRefreshIcons(listEl);
+}
+
+function syncSpraySummaryFieldsFromLedger(sp) {
+  const fin = computeSprayFinancials(sp, state.config);
+  sp.amount = fin.totalClient;
+  sp.amountPaid = fin.paidAmount;
+  sp.payStatus = fin.payStatus;
+  if (fin.lastActivePayment) {
+    sp.payMethod = fin.lastActivePayment.method;
+    sp.payRef = fin.lastActivePayment.ref;
+    sp.payBank = fin.lastActivePayment.bank;
+  }
+  return fin;
+}
+
 function openPaymentModal(sprayId) {
   const sp = state.sprays.find(s => s.id === sprayId);
   if (!sp) return;
   const farm = getFarmById(sp.farmId);
   const prod = farm ? getProducerByFarmId(farm.id) : null;
-  const total = roundMoney(sp.amount);
-  const paid = getSprayPaidAmount(sp);
-  const balance = getSprayPendingBalance(sp);
+  const fin = getSprayFinancials(sp);
 
   document.getElementById("paymentForm").reset();
   document.getElementById("paymentSprayId").value = sp.id;
+  document.getElementById("paymentDate").value = getGuayaquilTodayStr();
   document.getElementById("paymentModalSubtitle").textContent =
-    `${prod ? prod.name : "Productor"} • ${farm ? farm.name : ""} (${sp.orderNumber || sp.date})`;
-  document.getElementById("paymentInfoTotal").textContent = formatMoney(total);
-  document.getElementById("paymentInfoPaid").textContent = formatMoney(paid);
-  document.getElementById("paymentInfoBalance").textContent = formatMoney(balance);
+    `${prod ? prod.name : "Productor"} • ${farm ? farm.name : ""} (${sp.orderNumber || sp.date} • ${sp.status})`;
+  document.getElementById("paymentInfoTotal").textContent = formatMoney(fin.totalClient);
+  document.getElementById("paymentInfoPaid").textContent = formatMoney(fin.paidAmount);
+
+  const balLabel = document.getElementById("paymentInfoBalanceLabel");
+  const balEl = document.getElementById("paymentInfoBalance");
+  if (!fin.isRealized) {
+    balLabel.textContent = "Estado";
+    balEl.textContent = fin.creditFavor > 0 ? `Anticipo ${formatMoney(fin.creditFavor)}` : "Estimado";
+    balEl.className = "font-bold text-brand-blue";
+  } else if (fin.creditFavor > 0) {
+    balLabel.textContent = "Saldo a Favor";
+    balEl.textContent = `+${formatMoney(fin.creditFavor)}`;
+    balEl.className = "font-bold text-brand-blue";
+  } else {
+    balLabel.textContent = "Saldo Exigible";
+    balEl.textContent = formatMoney(fin.collectibleBalance);
+    balEl.className = fin.collectibleBalance > 0 ? "font-bold text-amber-400" : "font-bold text-brand-accent";
+  }
 
   const addInput = document.getElementById("paymentAddAmount");
-  addInput.value = balance.toFixed(2);
-  addInput.max = balance.toFixed(2);
+  const remaining = Math.max(0, roundMoney(fin.totalClient - fin.paidAmount));
+  addInput.value = remaining > 0 ? remaining.toFixed(2) : "";
+  addInput.removeAttribute("max");
 
-  document.getElementById("paymentMethod").value = sp.payMethod || "Transferencia";
-  document.getElementById("paymentRef").value = sp.payRef || "";
-  document.getElementById("paymentBank").value = sp.payBank || "";
+  document.getElementById("paymentMethod").value = "Transferencia";
+  toggleQuickPaymentBankField();
+  renderPaymentHistoryInsideModal(sp, fin);
 
   document.getElementById("paymentModal").classList.remove("hidden");
   safeRefreshIcons();
+}
+
+function appendPaymentMovementToSpray(sp, movementData) {
+  if (!Array.isArray(sp.payments)) {
+    migrateSprayPaymentsFromV4(sp, 0);
+  }
+  const mov = normalizePaymentMovement(movementData, sp.payments.length, getGuayaquilTodayStr());
+  sp.payments.push(mov);
+  const fin = syncSpraySummaryFieldsFromLedger(sp);
+  saveState(true);
+  renderPaymentHistoryInsideModal(sp, fin);
+  closeModal("paymentModal");
+  refreshAllViews();
+
+  if (fin.payStatus === "Pagado") {
+    showToast(`Abono de ${formatMoney(mov.amount)} registrado. Orden liquidada en su totalidad.`, "success");
+  } else if (fin.payStatus === "Saldo a favor" || fin.payStatus === "Anticipo") {
+    showToast(`Abono de ${formatMoney(mov.amount)} registrado (${fin.payStatus}: ${formatMoney(fin.creditFavor)}).`, "info");
+  } else {
+    showToast(`Abono de ${formatMoney(mov.amount)} registrado. Nuevo saldo: ${formatMoney(fin.collectibleBalance)}.`, "success");
+  }
 }
 
 function saveQuickPaymentForm(e) {
@@ -1904,53 +2280,109 @@ function saveQuickPaymentForm(e) {
   const sp = state.sprays.find(s => s.id === sprayId);
   if (!sp) return;
 
-  const balance = getSprayPendingBalance(sp);
-  const addAmount = roundMoney(parseFloat(document.getElementById("paymentAddAmount").value));
-
-  if (!Number.isFinite(addAmount) || addAmount <= 0) {
-    showToast("Ingresa un monto de abono mayor a $0.00.", "error");
-    return;
-  }
-  if (addAmount > balance) {
-    showToast(`El abono (${formatMoney(addAmount)}) no puede superar el saldo pendiente (${formatMoney(balance)}).`, "error");
-    return;
-  }
-
-  const newPaid = roundMoney(getSprayPaidAmount(sp) + addAmount);
-  sp.amountPaid = Math.min(roundMoney(sp.amount), newPaid);
-  sp.payStatus = sp.amountPaid >= roundMoney(sp.amount) ? "Pagado" : "Parcial";
-  sp.payMethod = document.getElementById("paymentMethod").value;
+  const rawAmount = parseFloat(document.getElementById("paymentAddAmount").value);
+  const payDate = document.getElementById("paymentDate").value;
+  const method = document.getElementById("paymentMethod").value;
   const ref = document.getElementById("paymentRef").value.trim();
-  const bank = document.getElementById("paymentBank").value.trim();
-  if (ref) sp.payRef = ref;
-  sp.payBank = sp.payMethod === "Efectivo" ? "" : bank;
+  const bank = method === "Efectivo" ? "" : document.getElementById("paymentBank").value.trim();
+  const note = document.getElementById("paymentNote").value.trim();
 
-  saveState(true);
-  closeModal("paymentModal");
-  refreshAllViews();
-  showToast(
-    sp.payStatus === "Pagado"
-      ? `Saldo liquidado (${formatMoney(addAmount)}). Cuenta marcada como Pagada.`
-      : `Abono de ${formatMoney(addAmount)} registrado. Nuevo saldo: ${formatMoney(getSprayPendingBalance(sp))}.`,
-    "success"
+  if (!Number.isFinite(rawAmount) || rawAmount <= 0 || rawAmount > 1e8) {
+    showToast("Ingresa un monto de abono válido mayor a $0.00.", "error");
+    return;
+  }
+  if (!isValidDateStr(payDate)) {
+    showToast("Selecciona una fecha válida para el abono.", "error");
+    return;
+  }
+
+  const addCents = toSafeCents(rawAmount);
+  const fin = getSprayFinancials(sp);
+  const movementData = {
+    id: generateUid("pay"),
+    date: payDate,
+    amountCents: addCents,
+    method,
+    ref,
+    bank,
+    note,
+    voided: false,
+    createdAt: new Date().toISOString()
+  };
+
+  if (!fin.isRealized) {
+    openConfirmModal(
+      "Registrar anticipo en orden no realizada",
+      `Esta orden está en estado "${sp.status}". El pago de ${formatMoney(fromCents(addCents))} se guardará como Anticipo del cliente sin marcar la fumigación como realizada. ¿Deseas continuar?`,
+      () => appendPaymentMovementToSpray(sp, movementData),
+      "Sí, registrar anticipo",
+      false
+    );
+    return;
+  }
+
+  if (fin.paidCents + addCents > fin.totalClientCents) {
+    const excess = fromCents((fin.paidCents + addCents) - fin.totalClientCents);
+    openConfirmModal(
+      "Confirmar sobrepago / saldo a favor",
+      `El abono ingresado (${formatMoney(fromCents(addCents))}) supera el saldo pendiente y generará un Saldo a favor del cliente por ${formatMoney(excess)}. ¿Confirmas que el monto es correcto?`,
+      () => appendPaymentMovementToSpray(sp, movementData),
+      "Sí, registrar saldo a favor",
+      false
+    );
+    return;
+  }
+
+  appendPaymentMovementToSpray(sp, movementData);
+}
+
+function requestVoidPaymentMovement(sprayId, paymentId) {
+  const sp = state.sprays.find(s => s.id === sprayId);
+  if (!sp || !Array.isArray(sp.payments)) return;
+  const mov = sp.payments.find(p => p.id === paymentId && !p.voided);
+  if (!mov) return;
+
+  openConfirmModal(
+    "Anular abono registrado",
+    `¿Seguro que deseas anular el abono de ${formatMoney(mov.amount)} (${mov.method} del ${mov.date})? El registro quedará marcado como Anulado en el historial por auditoría y se recalculará el saldo de la orden.`,
+    () => {
+      mov.voided = true;
+      mov.voidedAt = new Date().toISOString();
+      mov.voidReason = "Anulado por usuario";
+      syncSpraySummaryFieldsFromLedger(sp);
+      saveState(true);
+      openPaymentModal(sp.id);
+      refreshAllViews();
+      showToast(`Abono de ${formatMoney(mov.amount)} anulado correctamente.`, "info");
+    },
+    "Sí, anular abono",
+    true
   );
 }
 
 function requestMarkSprayAsPaid(sprayId) {
   const sp = state.sprays.find(s => s.id === sprayId);
   if (!sp) return;
-  const saldo = getSprayPendingBalance(sp);
+  const fin = getSprayFinancials(sp);
+  if (!fin.isRealized || fin.collectibleBalanceCents <= 0) return;
+
   openConfirmModal(
-    "Confirmar pago completo",
-    `¿Confirmas liquidar el saldo pendiente de ${formatMoney(saldo)} de la orden ${sp.orderNumber || sp.date}?`,
+    "Liquidar saldo exigible",
+    `¿Registrar un abono por el saldo restante de ${formatMoney(fin.collectibleBalance)} (${sp.payMethod || "Transferencia"}) para dejar pagada la orden ${sp.orderNumber || sp.date}?`,
     () => {
-      sp.payStatus = "Pagado";
-      sp.amountPaid = roundMoney(sp.amount);
-      saveState(true);
-      refreshAllViews();
-      showToast("Pago marcado como completado.", "success");
+      appendPaymentMovementToSpray(sp, {
+        id: generateUid("pay"),
+        date: getGuayaquilTodayStr(),
+        amountCents: fin.collectibleBalanceCents,
+        method: ["Transferencia", "Cheque", "Efectivo"].includes(sp.payMethod) ? sp.payMethod : "Transferencia",
+        ref: "",
+        bank: "",
+        note: "Liquidación directa de saldo",
+        voided: false,
+        createdAt: new Date().toISOString()
+      });
     },
-    "Sí, marcar pagado",
+    "Sí, liquidar saldo",
     false
   );
 }
@@ -1958,17 +2390,16 @@ function requestMarkSprayAsPaid(sprayId) {
 function exportBillingCSV() {
   const header = [
     "Fecha", "Orden", "EstadoFumigacion", "Productor", "CedulaRUC", "Finca",
-    "Hectareas", "Producto", "Piloto", "Dron", "MontoTotal", "Abonado",
-    "SaldoExigible", "MetodoPago", "Referencia", "Banco", "EstadoPago"
+    "Hectareas", "TarifaHa", "Subtotal", "DescuentoPct", "IVA_Pct", "MontoTotal",
+    "AbonadoVigente", "SaldoExigible", "SaldoAFavor_Anticipo", "MetodosAbono",
+    "CantidadAbonos", "EstadoCobro", "PagoPilotoDevengado", "PagoPilotoEstimado"
   ].map(csvCell).join(",");
 
   const lines = [header];
   state.sprays.forEach(sp => {
     const farm = getFarmById(sp.farmId);
     const prod = farm ? getProducerByFarmId(farm.id) : null;
-    const collectible = isCollectibleSpray(sp);
-    const paid = collectible ? getSprayPaidAmount(sp) : 0;
-    const saldo = collectible ? getSprayPendingBalance(sp) : 0;
+    const fin = getSprayFinancials(sp);
 
     lines.push([
       sp.date,
@@ -1977,17 +2408,20 @@ function exportBillingCSV() {
       prod ? prod.name : "",
       prod ? prod.doc : "",
       farm ? farm.name : "",
-      formatHectares(sp.hectares),
-      sp.product || "",
-      sp.pilot || "",
-      sp.drone || "",
-      roundMoney(sp.amount).toFixed(2),
-      paid.toFixed(2),
-      saldo.toFixed(2),
-      sp.payMethod || "",
-      sp.payRef || "",
-      sp.payBank || "",
-      collectible ? (sp.payStatus || "") : `No exigible (${sp.status})`
+      formatHectares(fin.hectares),
+      fin.unitRateHa.toFixed(2),
+      fin.subtotal.toFixed(2),
+      fin.discountPct.toFixed(2),
+      fin.ivaPct.toFixed(2),
+      fin.totalClient.toFixed(2),
+      fin.paidAmount.toFixed(2),
+      fin.collectibleBalance.toFixed(2),
+      fin.creditFavor.toFixed(2),
+      fin.primaryMethodDisplay,
+      String(fin.activePaymentsCount),
+      fin.payStatus,
+      fin.pilotPayAccrued.toFixed(2),
+      fin.pilotPayEstimated.toFixed(2)
     ].map(csvCell).join(","));
   });
 
@@ -2005,7 +2439,7 @@ function exportBillingCSV() {
 }
 
 // ==========================================================================
-// 8. REPROGRAMACIONES CON DESCRIPCIÓN Y LIMPIEZA
+// 8. REPROGRAMACIONES CON PROTECCIÓN DE ABONOS Y PAGOS A PILOTO
 // ==========================================================================
 function renderRescheduleHistoryInsideModal(farm) {
   const histBox = document.getElementById("rescheduleHistoryBox");
@@ -2048,37 +2482,16 @@ function openRescheduleModal(farmId, sprayId = null) {
   safeRefreshIcons();
 }
 
-function saveRescheduleForm(e) {
-  e.preventDefault();
-  const farmId = document.getElementById("rescheduleFarmId").value;
-  const sprayId = document.getElementById("rescheduleSprayId").value;
-  const oldDate = document.getElementById("rescheduleOldDate").value;
-  const newDate = document.getElementById("rescheduleNewDate").value;
-  const description = document.getElementById("rescheduleDescription").value.trim();
-
-  if (!isValidDateStr(newDate)) {
-    showToast("Selecciona una nueva fecha válida para la reprogramación.", "error");
-    return;
-  }
-  if (description.length < 3) {
-    showToast("Escribe el motivo o descripción de la reprogramación (mínimo 3 caracteres).", "error");
-    return;
-  }
-
-  const farm = getFarmById(farmId);
-  if (!farm) return;
-  const prod = getProducerByFarmId(farm.id);
-
-  if (sprayId) {
-    const sp = state.sprays.find(s => s.id === sprayId);
-    if (sp) {
-      const wasRealizada = sp.status === "Realizada";
-      sp.status = "Reprogramada";
-      sp.date = newDate;
-      sp.rescheduleDescription = description;
-      if (wasRealizada) {
-        syncFarmLastSprayFromHistory(farm.id);
-      }
+function applyRescheduleConfirmed(farm, prod, sp, oldDate, newDate, description) {
+  if (sp) {
+    const wasRealizada = sp.status === "Realizada";
+    sp.status = "Reprogramada";
+    sp.date = newDate;
+    sp.rescheduleDescription = description;
+    sp.pilotPaid = false;
+    syncSpraySummaryFieldsFromLedger(sp);
+    if (wasRealizada) {
+      syncFarmLastSprayFromHistory(farm.id);
     }
   }
 
@@ -2112,6 +2525,49 @@ function saveRescheduleForm(e) {
   safeRefreshIcons();
 }
 
+function saveRescheduleForm(e) {
+  e.preventDefault();
+  const farmId = document.getElementById("rescheduleFarmId").value;
+  const sprayId = document.getElementById("rescheduleSprayId").value;
+  const oldDate = document.getElementById("rescheduleOldDate").value;
+  const newDate = document.getElementById("rescheduleNewDate").value;
+  const description = document.getElementById("rescheduleDescription").value.trim();
+
+  if (!isValidDateStr(newDate)) {
+    showToast("Selecciona una nueva fecha válida para la reprogramación.", "error");
+    return;
+  }
+  if (description.length < 3) {
+    showToast("Escribe el motivo o descripción de la reprogramación (mínimo 3 caracteres).", "error");
+    return;
+  }
+
+  const farm = getFarmById(farmId);
+  if (!farm) return;
+  const prod = getProducerByFarmId(farm.id);
+  const sp = sprayId ? state.sprays.find(s => s.id === sprayId) : null;
+
+  if (sp) {
+    const guard = canTransitionSprayStatus(sp, "Reprogramada", state.config);
+    if (!guard.allowed) {
+      showToast(guard.reason, "error");
+      return;
+    }
+    if (guard.requiresConfirm) {
+      openConfirmModal(
+        "Reprogramar orden con abonos registrados",
+        guard.message,
+        () => applyRescheduleConfirmed(farm, prod, sp, oldDate, newDate, description),
+        "Sí, conservar anticipo y reprogramar",
+        false
+      );
+      return;
+    }
+  }
+
+  applyRescheduleConfirmed(farm, prod, sp, oldDate, newDate, description);
+}
+
 function requestClearReschedule() {
   const farmId = document.getElementById("rescheduleFarmId").value;
   const farm = getFarmById(farmId);
@@ -2134,7 +2590,7 @@ function requestClearReschedule() {
 }
 
 // ==========================================================================
-// 9. GENERACIÓN DE PDFs IMPRIMIBLES EN BLANCO (PROTEGIDO CONTRA XSS)
+// 9. GENERACIÓN DE PDFs A4 CON DESGLOSE DE DESCUENTO, IVA Y ABONOS
 // ==========================================================================
 function printCurrentPdf() {
   window.print();
@@ -2164,11 +2620,20 @@ function getAssociationHeaderPdfHtml(docTitle, rightMetaHtml) {
   `;
 }
 
+function getPdfPayPillClass(payStatus) {
+  if (payStatus === "Pagado") return "is-ok";
+  if (payStatus === "Saldo a favor" || payStatus === "Anticipo") return "is-info";
+  if (payStatus === "Parcial") return "is-warn";
+  if (payStatus === "No exigible") return "";
+  return "is-danger";
+}
+
 function openSprayPdfModal(sprayId) {
   const sp = state.sprays.find(s => s.id === sprayId);
   if (!sp) return;
   const farm = getFarmById(sp.farmId);
   const prod = farm ? getProducerByFarmId(farm.id) : null;
+  const fin = getSprayFinancials(sp);
 
   const orderNextRule = calculateScheduleForDate(sp.date);
   const products = Array.isArray(sp.products) && sp.products.length > 0
@@ -2185,12 +2650,39 @@ function openSprayPdfModal(sprayId) {
     </tr>
   `).join("");
 
-  const total = roundMoney(sp.amount);
-  const paid = getSprayPaidAmount(sp);
-  const saldo = getSprayPendingBalance(sp);
+  const activeMovements = fin.payments.filter(m => !m.voided && m.amountCents > 0);
+  const paymentsTableHtml = activeMovements.length > 0
+    ? `
+      <div class="space-y-1.5 pdf-avoid-break">
+        <div class="pdf-section-title">Detalle de Abonos / Pagos Registrados</div>
+        <div class="pdf-table-scroll">
+          <table class="pdf-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Método</th>
+                <th>Referencia / Banco</th>
+                <th class="text-right">Monto</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${activeMovements.map(m => `
+                <tr>
+                  <td>${escapeHtml(m.date)}</td>
+                  <td>${escapeHtml(m.method)}</td>
+                  <td>${escapeHtml([m.ref, m.bank, m.note].filter(Boolean).join(" • ") || "-")}</td>
+                  <td class="text-right font-semibold">${formatMoney(m.amount)}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `
+    : "";
 
   const statusPillClass = sp.status === "Realizada" ? "is-ok" : (sp.status === "Reprogramada" ? "is-warn" : "");
-  const payPillClass = sp.payStatus === "Pagado" ? "is-ok" : (sp.payStatus === "Parcial" ? "is-warn" : "is-danger");
+  const payPillClass = getPdfPayPillClass(fin.payStatus);
 
   document.getElementById("sprayPdfModalContent").innerHTML = `
     ${getAssociationHeaderPdfHtml(
@@ -2209,7 +2701,7 @@ function openSprayPdfModal(sprayId) {
         <div>Cédula / RUC: <strong>${escapeHtml(prod ? prod.doc : "N/A")}</strong></div>
         <div>Finca: <strong>${escapeHtml(farm ? farm.name : "N/A")}</strong> (${escapeHtml(farm ? farm.crop : "N/A")})</div>
         <div>Sector: <strong>${escapeHtml(farm ? farm.sector : "N/A")}</strong></div>
-        <div>Superficie aplicada: <strong>${formatHectares(sp.hectares)} hectáreas</strong></div>
+        <div>Superficie aplicada: <strong>${formatHectares(fin.hectares)} hectáreas</strong></div>
       </div>
 
       <div class="pdf-section-box space-y-1">
@@ -2223,35 +2715,43 @@ function openSprayPdfModal(sprayId) {
 
     <div class="space-y-2">
       <div class="pdf-section-title">Detalle de Producto(s) Aplicados y Dosis</div>
-      <table class="pdf-table">
-        <thead>
-          <tr>
-            <th>Nombre Comercial</th>
-            <th>Ingrediente Activo</th>
-            <th>Dosis / ha</th>
-            <th>Volumen Total</th>
-            <th>Lote</th>
-          </tr>
-        </thead>
-        <tbody>${productsRows}</tbody>
-      </table>
+      <div class="pdf-table-scroll">
+        <table class="pdf-table">
+          <thead>
+            <tr>
+              <th>Nombre Comercial</th>
+              <th>Ingrediente Activo</th>
+              <th>Dosis / ha</th>
+              <th>Volumen Total</th>
+              <th>Lote</th>
+            </tr>
+          </thead>
+          <tbody>${productsRows}</tbody>
+        </table>
+      </div>
     </div>
+
+    ${paymentsTableHtml}
 
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pdf-avoid-break">
       <div class="pdf-section-box space-y-1">
-        <div class="pdf-section-title">Próxima Programación y Método de Pago</div>
+        <div class="pdf-section-title">Próxima Programación y Condición</div>
         <div>Próxima fecha tentativa: <strong>${orderNextRule.nextDateStr ? `${formatDisplayDate(orderNextRule.nextDateStr, true)} (${orderNextRule.nextDateStr})` : "Por definir"}</strong></div>
         <div class="text-[11px] text-slate-600">Regla aplicada: +${orderNextRule.daysToAdd} días (Temporada ${orderNextRule.isRainy ? "Lluviosa" : "Seca"})</div>
-        <div>Método de pago: <strong>${escapeHtml(sp.payMethod)}</strong>${sp.payRef ? ` • Ref: ${escapeHtml(sp.payRef)}` : ""}${sp.payBank ? ` • ${escapeHtml(sp.payBank)}` : ""}</div>
+        <div>Modalidad de pago: <strong>${escapeHtml(fin.primaryMethodDisplay)}</strong></div>
       </div>
 
-      <div class="pdf-section-box space-y-1">
-        <div class="pdf-section-title">Resumen Económico</div>
-        <div class="flex justify-between"><span>Monto total del servicio:</span><strong>${formatMoney(total)}</strong></div>
-        <div class="flex justify-between"><span>Monto abonado:</span><strong>${formatMoney(paid)}</strong></div>
-        <div class="flex justify-between"><span>Estado de pago:</span><span class="pdf-status-pill ${payPillClass}">${escapeHtml(sp.payStatus)}</span></div>
+      <div class="pdf-section-box space-y-1 tabular-nums">
+        <div class="pdf-section-title">Resumen Económico (${fin.isRealized ? "Devengado" : "Estimado no exigible"})</div>
+        ${(fin.discount > 0 || fin.iva > 0) ? `<div class="flex justify-between"><span>Subtotal (${formatHectares(fin.hectares)} ha × ${formatMoney(fin.unitRateHa)}):</span><strong>${formatMoney(fin.subtotal)}</strong></div>` : ""}
+        ${fin.discount > 0 ? `<div class="flex justify-between text-emerald-800"><span>Descuento (${fin.discountPct}%):</span><strong>-${formatMoney(fin.discount)}</strong></div>` : ""}
+        ${fin.iva > 0 ? `<div class="flex justify-between"><span>IVA (${fin.ivaPct}%):</span><strong>+${formatMoney(fin.iva)}</strong></div>` : ""}
+        <div class="flex justify-between"><span>Total del servicio:</span><strong>${formatMoney(fin.totalClient)}</strong></div>
+        <div class="flex justify-between"><span>Total abonado vigente:</span><strong>${formatMoney(fin.paidAmount)}</strong></div>
+        <div class="flex justify-between"><span>Estado de cobro:</span><span class="pdf-status-pill ${payPillClass}">${escapeHtml(fin.payStatus)}</span></div>
         <div class="flex justify-between pt-1 border-t border-slate-300 font-extrabold text-sm">
-          <span>Saldo pendiente:</span><span>${formatMoney(saldo)}</span>
+          <span>${fin.creditFavor > 0 ? "Saldo a favor / Anticipo:" : "Saldo exigible:"}</span>
+          <span>${fin.creditFavor > 0 ? `+${formatMoney(fin.creditFavor)}` : formatMoney(fin.collectibleBalance)}</span>
         </div>
       </div>
     </div>
@@ -2286,31 +2786,17 @@ function openStatementModal(prodId) {
   const phoneInfo = parseEcuadorWhatsApp(prod.phone);
   const farmIds = new Set((prod.farms || []).map(f => f.id));
 
-  let totalBilled = 0;
-  let totalPaid = 0;
-  let totalHa = 0;
-
   const prodSprays = state.sprays
     .filter(sp => farmIds.has(sp.farmId))
     .slice()
     .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 
+  const prodSummary = computePortfolioSummary(prodSprays, state.config);
+
   const rowsHtml = prodSprays.map(sp => {
     const farm = getFarmById(sp.farmId);
-    const collectible = isCollectibleSpray(sp);
-    const amt = roundMoney(sp.amount);
-    const paid = collectible ? getSprayPaidAmount(sp) : 0;
-    const saldo = collectible ? getSprayPendingBalance(sp) : 0;
-
-    if (collectible) {
-      totalBilled = roundMoney(totalBilled + amt);
-      totalPaid = roundMoney(totalPaid + paid);
-      totalHa = roundHectares(totalHa + (Number(sp.hectares) || 0));
-    }
-
-    const payPillClass = !collectible
-      ? ""
-      : (sp.payStatus === "Pagado" ? "is-ok" : (sp.payStatus === "Parcial" ? "is-warn" : "is-danger"));
+    const fin = getSprayFinancials(sp);
+    const payPillClass = getPdfPayPillClass(fin.payStatus);
 
     return `
       <tr>
@@ -2319,19 +2805,23 @@ function openStatementModal(prodId) {
           <div class="text-[10px] font-mono text-slate-500">${escapeHtml(sp.orderNumber || "")}</div>
         </td>
         <td class="font-medium">${escapeHtml(farm ? farm.name : "N/A")}</td>
-        <td>${escapeHtml(sp.product)} <span class="text-slate-500">(${formatHectares(sp.hectares)} ha • ${escapeHtml(sp.status)})</span></td>
-        <td class="text-right font-semibold">${formatMoney(amt)}</td>
-        <td class="text-right">${formatMoney(paid)}</td>
-        <td class="text-right font-bold">${formatMoney(saldo)}</td>
         <td>
-          <div>${escapeHtml(sp.payMethod)}${sp.payRef ? ` (${escapeHtml(sp.payRef)})` : ""}</div>
-          <span class="pdf-status-pill ${payPillClass}">${collectible ? escapeHtml(sp.payStatus) : `No exigible (${escapeHtml(sp.status)})`}</span>
+          ${escapeHtml(sp.product)}
+          <span class="text-slate-500">(${formatHectares(fin.hectares)} ha • ${escapeHtml(sp.status)})</span>
+          ${fin.discountPct > 0 ? `<span class="text-emerald-700 font-semibold"> • Desc. ${fin.discountPct}%</span>` : ""}
+        </td>
+        <td class="text-right font-semibold">${formatMoney(fin.totalClient)}</td>
+        <td class="text-right">${formatMoney(fin.paidAmount)}</td>
+        <td class="text-right font-bold">${fin.creditFavor > 0 ? `+${formatMoney(fin.creditFavor)}` : formatMoney(fin.collectibleBalance)}</td>
+        <td>
+          <div>${escapeHtml(fin.primaryMethodDisplay)}</div>
+          <span class="pdf-status-pill ${payPillClass}">${escapeHtml(fin.payStatus)}</span>
         </td>
       </tr>
     `;
   }).join("");
 
-  const pending = roundMoney(Math.max(0, totalBilled - totalPaid));
+  const totalCredit = roundMoney(prodSummary.creditFavorTotal + prodSummary.advancesOnPendingTotal);
 
   content.innerHTML = `
     ${getAssociationHeaderPdfHtml(
@@ -2348,42 +2838,46 @@ function openStatementModal(prodId) {
         <div>Nombre: <strong>${escapeHtml(prod.name)}</strong></div>
         <div>Cédula / RUC: <strong>${escapeHtml(prod.doc)}</strong></div>
         <div>WhatsApp: <strong>${escapeHtml(phoneInfo.valid ? phoneInfo.display : "No registrado")}</strong></div>
-        <div>Fincas registradas: <strong>${(prod.farms || []).length}</strong> • Hectáreas fumigadas: <strong>${formatHectares(totalHa)} ha</strong></div>
+        <div>Fincas registradas: <strong>${(prod.farms || []).length}</strong> • Hectáreas realizadas: <strong>${formatHectares(prodSummary.realizedHectares)} ha</strong></div>
       </div>
     </div>
 
     <div class="space-y-2">
       <div class="pdf-section-title">Detalle Cronológico de Servicios</div>
-      <table class="pdf-table">
-        <thead>
-          <tr>
-            <th>Fecha / Orden</th>
-            <th>Finca</th>
-            <th>Detalle Servicio</th>
-            <th class="text-right">Monto</th>
-            <th class="text-right">Abonado</th>
-            <th class="text-right">Saldo</th>
-            <th>Pago / Estado</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rowsHtml || '<tr><td colspan="7" class="text-center text-slate-500 py-4">Sin fumigaciones registradas para este productor.</td></tr>'}
-        </tbody>
-      </table>
+      <div class="pdf-table-scroll">
+        <table class="pdf-table">
+          <thead>
+            <tr>
+              <th>Fecha / Orden</th>
+              <th>Finca</th>
+              <th>Detalle Servicio</th>
+              <th class="text-right">Total</th>
+              <th class="text-right">Abonado</th>
+              <th class="text-right">Saldo / A Favor</th>
+              <th>Pago / Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || '<tr><td colspan="7" class="text-center text-slate-500 py-4">Sin fumigaciones registradas para este productor.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="flex justify-end pt-2 pdf-avoid-break">
-      <div class="pdf-section-box w-full sm:w-72 space-y-1.5 text-xs">
-        <div class="flex justify-between"><span>Total Facturado (Realizadas):</span><strong>${formatMoney(totalBilled)}</strong></div>
-        <div class="flex justify-between text-emerald-800"><span>Total Pagado / Abonado:</span><strong>${formatMoney(totalPaid)}</strong></div>
-        <div class="flex justify-between text-sm font-black pt-1.5 border-t border-slate-300 ${pending > 0 ? "text-rose-800" : "text-emerald-800"}">
-          <span>Saldo Pendiente:</span><span>${formatMoney(pending)}</span>
+      <div class="pdf-section-box w-full sm:w-80 space-y-1.5 text-xs tabular-nums">
+        <div class="flex justify-between"><span>Facturado Devengado (Realizadas):</span><strong>${formatMoney(prodSummary.billedAccrued)}</strong></div>
+        ${prodSummary.billedEstimated > 0 ? `<div class="flex justify-between text-slate-600"><span>Programado Estimado (No exigible):</span><strong>${formatMoney(prodSummary.billedEstimated)}</strong></div>` : ""}
+        <div class="flex justify-between text-emerald-800"><span>Total Abonado Vigente:</span><strong>${formatMoney(prodSummary.totalCashCollected)}</strong></div>
+        ${totalCredit > 0 ? `<div class="flex justify-between text-blue-800"><span>Anticipos / Saldo a Favor:</span><strong>+${formatMoney(totalCredit)}</strong></div>` : ""}
+        <div class="flex justify-between text-sm font-black pt-1.5 border-t border-slate-300 ${prodSummary.collectibleTotal > 0 ? "text-rose-800" : "text-emerald-800"}">
+          <span>Saldo Exigible Actual:</span><span>${formatMoney(prodSummary.collectibleTotal)}</span>
         </div>
       </div>
     </div>
 
     <div class="pt-3 border-t border-slate-200 text-[10px] text-slate-500 flex justify-between">
-      <span>${escapeHtml(state.config.assocName || "AgroDrone")} • Control de Secretaría</span>
+      <span>${escapeHtml(state.config.assocName || "AgroDrone")} • Gestión Empresarial</span>
       <span>Emisión: ${getGuayaquilTodayStr()}</span>
     </div>
   `;
@@ -2393,7 +2887,7 @@ function openStatementModal(prodId) {
 }
 
 // ==========================================================================
-// 10. CONFIGURACIÓN Y LOGO COMPRIMIDO
+// 10. CONFIGURACIÓN Y LOGO AISLADO
 // ==========================================================================
 function populateSettingsForm() {
   const cfg = state.config;
@@ -2402,6 +2896,7 @@ function populateSettingsForm() {
   document.getElementById("settingAssocRuc").value = cfg.assocRuc || "";
   document.getElementById("settingClientRatePerHa").value = cfg.clientRatePerHa !== undefined ? cfg.clientRatePerHa : 15.0;
   document.getElementById("settingPilotRatePerHa").value = cfg.pilotRatePerHa !== undefined ? cfg.pilotRatePerHa : 4.5;
+  document.getElementById("settingDefaultIvaPct").value = cfg.defaultIvaPct !== undefined ? cfg.defaultIvaPct : 0;
   document.getElementById("settingPilotsList").value = (cfg.pilots || []).join(", ");
   document.getElementById("settingDronesList").value = (cfg.drones || []).join(", ");
   document.getElementById("settingWaTemplateReminder").value = cfg.waTemplateReminder || DEFAULT_WA_REMINDER_TEMPLATE;
@@ -2476,7 +2971,7 @@ function handleAssocLogoUpload(event) {
       logoImg.src = dataUrl;
       logoImg.classList.remove("hidden");
       saveState(true);
-      showToast("Logo optimizado y cargado para los PDFs.", "success");
+      showToast("Logo optimizado y guardado en clave aislada.", "success");
     };
     img.onerror = function () {
       showToast("No se pudo procesar la imagen del logo.", "error");
@@ -2489,6 +2984,7 @@ function handleAssocLogoUpload(event) {
 
 function clearAssocLogo() {
   state.config.assocLogoDataUrl = "";
+  localStorage.removeItem(LOGO_STORAGE_KEY);
   const logoImg = document.getElementById("settingLogoPreview");
   if (logoImg) {
     logoImg.src = "";
@@ -2511,6 +3007,7 @@ function saveSettings(e) {
   const assocRuc = document.getElementById("settingAssocRuc").value.trim();
   const clientRate = parseFloat(document.getElementById("settingClientRatePerHa").value);
   const pilotRate = parseFloat(document.getElementById("settingPilotRatePerHa").value);
+  const defaultIva = parseFloat(document.getElementById("settingDefaultIvaPct").value || "0");
   const pilotsRaw = document.getElementById("settingPilotsList").value.split(",").map(s => s.trim()).filter(Boolean);
   const dronesRaw = document.getElementById("settingDronesList").value.split(",").map(s => s.trim()).filter(Boolean);
   const daysRainy = parseInt(document.getElementById("settingDaysRainy").value, 10);
@@ -2528,6 +3025,10 @@ function saveSettings(e) {
   }
   if (!Number.isFinite(pilotRate) || pilotRate < 0) {
     showToast("El pago por hectárea al piloto debe ser mayor o igual a 0.", "error");
+    return;
+  }
+  if (!Number.isFinite(defaultIva) || defaultIva < 0 || defaultIva > 100) {
+    showToast("El IVA predeterminado debe estar entre 0% y 100%.", "error");
     return;
   }
   if (pilotsRaw.length === 0) {
@@ -2561,6 +3062,7 @@ function saveSettings(e) {
   state.config.assocRuc = assocRuc;
   state.config.clientRatePerHa = roundMoney(clientRate);
   state.config.pilotRatePerHa = roundMoney(pilotRate);
+  state.config.defaultIvaPct = roundMoney(defaultIva);
   state.config.pilots = pilotsRaw;
   state.config.drones = dronesRaw;
   state.config.waTemplateReminder = document.getElementById("settingWaTemplateReminder").value.trim() || DEFAULT_WA_REMINDER_TEMPLATE;
@@ -2575,5 +3077,5 @@ function saveSettings(e) {
 
   saveState(true);
   refreshAllViews();
-  showToast("Configuración guardada y todas las frecuencias recalculadas.", "success");
+  showToast("Configuración guardada y frecuencias recalculadas.", "success");
 }

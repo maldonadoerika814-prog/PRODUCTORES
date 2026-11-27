@@ -1,7 +1,7 @@
 /* ==========================================================================
    AgroDrone - Hoja de Estilos Principal (css/styles.css)
-   Fondo fijo con ../fondo.jpg, capa oscura semitransparente, efecto vidrio
-   y estilos de impresión limpia en blanco para PDFs.
+   Fondo fijo con ../fondo.jpg, capa oscura semitransparente, efecto vidrio,
+   alineación financiera tabular-nums y estilos de impresión limpia A4.
    ========================================================================== */
 
 :root {
@@ -22,6 +22,53 @@ body {
   position: relative;
   overflow-x: hidden;
   min-height: 100vh;
+}
+
+@media screen and (max-width: 1023px) {
+  html.drawer-open,
+  body.drawer-open {
+    overflow: hidden;
+  }
+}
+
+/* Estilo base de especificidad cero (0,0,0) para no pisar hidden / sm:hidden / lg:hidden */
+:where([data-lucide], svg.lucide) {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+/* Accesibilidad por teclado clara con identidad de marca */
+:focus-visible {
+  outline: 2px solid #00ff88;
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(0, 255, 136, 0.75);
+  outline-offset: 0;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.topbar-safe {
+  padding-top: max(0.75rem, env(safe-area-inset-top, 0px));
+}
+
+.modal-safe-sheet {
+  max-height: 92vh;
+  max-height: 92dvh;
+  overscroll-behavior: contain;
+}
+
+@media screen and (max-width: 639px) {
+  .modal-safe-sheet {
+    padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 /* Fondo fijo a pantalla completa usando fondo.jpg optimizado */
@@ -120,19 +167,28 @@ body {
   box-shadow: 0 0 16px rgba(0, 255, 136, 0.12);
 }
 
-/* Contenedor responsivo para gráficos Chart.js */
 .chart-box {
-  height: 16rem;
+  height: 15rem;
   position: relative;
 }
 
-/* Errores visuales de validación en campos */
+@media (min-width: 1024px) {
+  .chart-box {
+    height: 17rem;
+  }
+}
+
+@media (min-width: 1536px) {
+  .chart-box {
+    height: 20rem;
+  }
+}
+
 .input-error {
   border-color: #ef4444 !important;
   box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25);
 }
 
-/* Animación suave al cambiar de pestaña */
 @keyframes fadeSlideIn {
   from {
     opacity: 0;
@@ -148,13 +204,11 @@ body {
   animation: fadeSlideIn 0.22s ease-out;
 }
 
-/* Notificaciones Toast animadas sin estilos inline */
 .toast-fade-out {
   opacity: 0 !important;
   transform: translateY(6px) !important;
 }
 
-/* Barras de desplazamiento personalizadas */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -173,16 +227,124 @@ body {
   background: #00ff88;
 }
 
-/* Ajustes para celular */
-@media (max-width: 767px) {
+@media screen and (max-width: 1023px) {
   #appBackgroundLayer {
     background-attachment: scroll;
   }
+}
 
-  input,
+@media screen and (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
   select,
   textarea {
-    font-size: 16px !important; /* Evita zoom involuntario en iOS Safari */
+    font-size: 16px !important;
+  }
+
+  /* Tablas operativas apiladas como tarjetas glass en pantallas móviles (<768px) */
+  table.responsive-table,
+  table.responsive-table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  table.responsive-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  table.responsive-table tbody tr {
+    display: block;
+    margin-bottom: 0.85rem;
+    padding: 0.85rem 0.95rem;
+    border-radius: 1rem;
+    background: linear-gradient(145deg, rgba(11, 19, 36, 0.88), rgba(6, 12, 24, 0.82));
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    box-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.72);
+  }
+
+  table.responsive-table tbody tr:last-child {
+    margin-bottom: 0;
+  }
+
+  table.responsive-table tbody td[colspan] {
+    display: block;
+    width: 100%;
+    padding: 1.5rem 0.75rem !important;
+    text-align: center !important;
+    border: none !important;
+  }
+
+  table.responsive-table tbody td[colspan]::before {
+    content: none !important;
+    display: none !important;
+  }
+
+  table.responsive-table tbody td:not([colspan]) {
+    display: block;
+    width: 100%;
+    padding: 0.48rem 0 !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    text-align: left !important;
+    white-space: normal !important;
+  }
+
+  table.responsive-table tbody td:not([colspan]):empty {
+    display: none !important;
+  }
+
+  table.responsive-table tbody td:not([colspan]):last-child {
+    border-bottom: none;
+    padding-bottom: 0.1rem !important;
+  }
+
+  table.responsive-table tbody td:not([colspan])[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #94a3b8;
+    margin-bottom: 0.22rem;
+  }
+
+  table.responsive-table tbody td[data-cell-inline="true"] {
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  table.responsive-table tbody td[data-cell-inline="true"]::before {
+    margin-bottom: 0;
+  }
+
+  table.responsive-table tbody td[data-cell-actions="true"] {
+    border-bottom: none;
+    padding-top: 0.65rem !important;
+    padding-bottom: 0.1rem !important;
+    margin-top: 0.15rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 
@@ -252,10 +414,17 @@ body {
   margin-bottom: 6px;
 }
 
+.pdf-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .pdf-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .pdf-table th {
@@ -310,12 +479,18 @@ body {
   color: #991b1b;
 }
 
+.pdf-status-pill.is-info {
+  background: #eff6ff;
+  border-color: #3b82f6;
+  color: #1e40af;
+}
+
 .pdf-avoid-break {
   break-inside: avoid;
   page-break-inside: avoid;
 }
 
-@media (max-width: 640px) {
+@media screen and (max-width: 640px) {
   .pdf-paper {
     padding: 16px;
   }
@@ -325,9 +500,6 @@ body {
   }
 }
 
-/* ==========================================================================
-   ESTILOS DE IMPRESIÓN (@media print) - PDF limpio en blanco sin páginas extra
-   ========================================================================== */
 @page {
   size: A4 portrait;
   margin: 12mm;
@@ -347,6 +519,10 @@ body {
     padding: 0 !important;
     min-height: auto !important;
     height: auto !important;
+    overflow: visible !important;
+  }
+
+  .pdf-table-scroll {
     overflow: visible !important;
   }
 

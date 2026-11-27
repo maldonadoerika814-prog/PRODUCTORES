@@ -5,6 +5,9 @@
 *Backup*.json
 *AutoBackup*.json
 
+# Dependencias locales de desarrollo
+node_modules/
+
 # Archivos temporales del sistema operativo / editores
 .DS_Store
 Thumbs.db
